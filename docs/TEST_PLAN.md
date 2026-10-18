@@ -19,7 +19,9 @@ Do not skip these tests before live use. Record the broker, account type, symbol
 - [ ] Open a position while the market is moving quickly; confirm rejected/unsafe candidates are logged and the bot retries.
 - [ ] Start the cBot while an eligible position is already open without a stop; confirm it attempts protection.
 - [ ] Confirm the candidate is beyond the selected closed-candle swing and rounded to tick size.
-- [ ] Confirm stop placement respects the broker's minimum distance/freeze rules.
+- [ ] Confirm stop placement respects the broker-reported minimum stop-loss distance when distance units are pips.
+- [ ] If the broker reports percentage-based minimum distance, confirm the diagnostic log displays the units and candidate stops respect the percentage-derived gap.
+- [ ] Confirm dynamic freeze rules can still reject an update and that the rejection is logged rather than treated as successful protection.
 - [ ] Force/observe a case where the candle-based level is too close to or through the current quote; confirm the fallback warning is visible and a broker rejection is never reported as success.
 
 ## Break-even and trailing
