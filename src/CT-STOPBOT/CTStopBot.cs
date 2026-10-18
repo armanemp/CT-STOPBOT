@@ -1081,7 +1081,7 @@ namespace CTStopBot
                 // but do not delete lines merely because the setup is not high-confidence.
                 double displayedStopPrice;
                 var hasRenderedStop = _marketGuidePrices.TryGetValue(sideKey + "_SL", out displayedStopPrice);
-                double displayedTargetPrice;
+                double displayedTargetPrice = targetPrice;
                 var hasRenderedTarget = !ShowSuggestedTpLine ||
                     _marketGuidePrices.TryGetValue(sideKey + "_TP", out displayedTargetPrice);
                 if (!hasRenderedStop)
@@ -1094,7 +1094,7 @@ namespace CTStopBot
                     : double.MaxValue;
                 var displayedDirectionalRisk = direction * (displayedEntryPrice - displayedStopPrice);
                 var displayedDirectionalReward = direction * (displayedTargetPrice - displayedEntryPrice);
-                double displayedRewardRisk;
+                double displayedRewardRisk = 0.0;
                 var hasDisplayedRewardRisk = ShowSuggestedTpLine &&
                     TryGetGuideCostAdjustedRewardRisk(displayedEntryPrice, displayedStopPrice,
                         displayedTargetPrice, tradeType, out displayedRewardRisk);
