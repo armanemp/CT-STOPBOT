@@ -956,6 +956,30 @@ namespace CTStopBot
                 if (!_marketGuidePrices.TryGetValue(sideKey + "_ENTRY", out displayedEntryPrice))
                     displayedEntryPrice = entryPrice;
 
+                // Recalculate risk/reward from the exact ENTRY price currently displayed.
+                // The entry line is smoothed to avoid jitter; never let an old displayed
+                // entry coexist with SL/TP levels whose geometry now fails the hard filters.
+                double displayedRewardRisk;
+                var displayedStopDistanceAtr = atrPrice > 0.0
+                    ? Math.Abs(displayedEntryPrice - stopPrice) / atrPrice
+                    : double.MaxValue;
+                if (!TryGetCostAdjustedRewardRisk(displayedEntryPrice, stopPrice, targetPrice,
+                        tradeType, out displayedRewardRisk) ||
+                    displayedStopDistanceAtr < MinimumQualityStopDistanceAtr ||
+                    displayedStopDistanceAtr > Math.Min(MaximumQualityStopDistanceAtr, MaximumPreTradeStopDistanceAtr))
+                {
+                    RemoveMarketGuideObject(sideKey + "_ENTRY");
+                    RemoveMarketGuideObject(sideKey + "_SL");
+                    RemoveMarketGuideObject(sideKey + "_TP");
+                    sideStatus = "WAIT — displayed ENTRY/SL/TP geometry failed the cost-adjusted R:R filter";
+                    return;
+                }
+
+                // From this point the reported R:R/risk distance matches the displayed
+                // ENTRY/SL/TP prices, rather than only the unsmoothed candidate values.
+                rewardRisk = displayedRewardRisk;
+                stopDistanceAtr = displayedStopDistanceAtr;
+
                 if (stopIsSafe)
                 {
                     DrawOrUpdateMarketGuide(sideKey + "_SL", tradeType, stopPrice,
