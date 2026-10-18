@@ -1009,6 +1009,7 @@ namespace CTStopBot
                 : swingHigh + stopBuffer;
             stopPrice = NormalizeStopPrice(rawStop, tradeType);
             stopIsSafe = IsSafeRelativeToMarket(stopPrice, tradeType);
+            stopDistanceAtr = atrPrice > 0.0 ? Math.Abs(entryPrice - stopPrice) / atrPrice : double.MaxValue;
 
             // TP projection combines volatility with the trend/momentum alignment for
             // this side; a nearby historical barrier can shorten an overly ambitious target.
