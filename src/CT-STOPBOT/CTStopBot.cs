@@ -451,7 +451,7 @@ namespace CTStopBot
 
             var liveFavorableMove = GetExecutableFavorableMovePrice(position);
             var minimumMaintainProfit = Math.Max(initialRiskPrice * 0.50, Symbol.Spread * 2.0);
-            double requiredTrailingLockPips;
+            double requiredTrailingLockPips = 0.0;
             var canLockTrailingProfit = hasInitialRisk && trailingActivated &&
                 liveFavorableMove >= minimumMaintainProfit &&
                 TryGetRequiredBreakEvenOffsetPips(position, out requiredTrailingLockPips);
