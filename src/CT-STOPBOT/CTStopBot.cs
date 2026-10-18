@@ -617,7 +617,7 @@ namespace CTStopBot
         private void DrawSuggestedTpObjects(Position position, double targetPrice, string context)
         {
             var currentBarTime = Bars.OpenTimes[Bars.Count - 1];
-            var startTime = currentBarTime.AddMinutes(-GuideLineBarsLeft * 5.0);
+            var startTime = GetGuideLineStartTime(currentBarTime);
             var endTime = currentBarTime.AddMinutes(GuideLineBarsRight * 5.0);
             var color = Color.FromHex("#438D7F");
             var lineName = GetSuggestedTpLineName(position.Id);
@@ -1221,7 +1221,7 @@ namespace CTStopBot
                 !string.Equals(previousStyle, styleKey, StringComparison.Ordinal);
 
             var currentBarTime = Bars.OpenTimes[Bars.Count - 1];
-            var startTime = currentBarTime.AddMinutes(-GuideLineBarsLeft * 5.0);
+            var startTime = GetGuideLineStartTime(currentBarTime);
             DateTime lastStartTime;
             var newBar = !_marketGuideStartTimes.TryGetValue(key, out lastStartTime) || lastStartTime != currentBarTime;
             var endTime = currentBarTime.AddMinutes(GuideLineBarsRight * 5.0);
@@ -1257,6 +1257,14 @@ namespace CTStopBot
             label.VerticalAlignment = VerticalAlignment.Center;
 
             _marketGuideContexts[key] = styleKey;
+        }
+
+        private DateTime GetGuideLineStartTime(DateTime currentBarTime)
+        {
+            var startIndex = Bars.Count - 1 - GuideLineBarsLeft;
+            return startIndex >= 0
+                ? Bars.OpenTimes[startIndex]
+                : currentBarTime.AddMinutes(-GuideLineBarsLeft * 5.0);
         }
 
         private double GetCurrentAtrPrice()
