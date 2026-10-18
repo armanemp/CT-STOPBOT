@@ -1102,7 +1102,7 @@ namespace CTStopBot
             setupContext = string.Format("align {0}/100 | {1} | {2} | R:R {3:F2} | {4}",
                 alignmentIndex,
                 sideAlignment >= 0.35 ? "trend aligned" : sideAlignment <= -0.35 ? "countertrend" : "mixed",
-                usedStructure ? "structure-capped" : "ATR target",
+                usedStructure ? (usedConfirmedPivot ? "confirmed pivot cap" : "range cap") : "ATR target",
                 rewardRisk,
                 quality);
             return true;
