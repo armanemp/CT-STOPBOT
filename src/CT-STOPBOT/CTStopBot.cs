@@ -630,9 +630,7 @@ namespace CTStopBot
             // Look for the nearest opposing closed-candle structure. Before the first
             // target is reached, even a close barrier matters; after a target is reached,
             // use a larger minimum distance to avoid reacting to tiny quote noise.
-            var structureSearchDistance = extendedAfterTarget
-                ? minimumTargetDistance
-                : Math.Max(Symbol.TickSize * 2.0, Symbol.Spread * 0.5);
+            var structureSearchDistance = Math.Max(Symbol.TickSize * 2.0, Symbol.Spread * 0.5);
             var firstIndex = lastClosedIndex - TpStructureLookback + 1;
             double nearestLevel;
             var foundLevel = TryFindNearestTargetPivot(
@@ -691,6 +689,9 @@ namespace CTStopBot
                 directionalScore <= -0.35 ? "COUNTER" : "MIXED";
             context = alignment + (usedStructure ? "/STRUCTURE" : "/ATR") +
                 (extendedAfterTarget ? "/NEXT" : string.Empty);
+            if (usedStructure &&
+                direction * (targetPrice - referencePrice) < minimumTargetDistance)
+                context += "/TIGHT";
 
             if (hasOriginalRisk)
             {
@@ -771,8 +772,12 @@ namespace CTStopBot
                 context.IndexOf("/RRLOW", StringComparison.Ordinal) >= 0;
             var targetRiskUnknown = context != null &&
                 context.IndexOf("/R_UNKNOWN", StringComparison.Ordinal) >= 0;
-            var targetLabel = targetIsLowRr || targetRiskUnknown ? "TP!" : "TP";
+            var targetIsTight = context != null &&
+                context.IndexOf("/TIGHT", StringComparison.Ordinal) >= 0;
+            var targetLabel = targetIsLowRr || targetRiskUnknown || targetIsTight ? "TP!" : "TP";
             var ratioText = targetRiskUnknown ? " | R:R n/a" : string.Empty;
+            if (targetIsTight)
+                ratioText += " | tight structure";
             double originalRisk;
             double netRewardRisk;
             var costReserve = Math.Max(Symbol.Spread, Symbol.TickSize)
@@ -1034,8 +1039,10 @@ namespace CTStopBot
             var directionalRisk = direction * (entryPrice - stopPrice);
             var directionalReward = direction * (targetPrice - entryPrice);
             var stopOnCorrectSide = calculated && directionalRisk >= minimumStructuralRisk;
+            var minimumQualityTargetDistance = Math.Max(Symbol.TickSize * 3.0,
+                Math.Max(Symbol.Spread * 1.5, atrPrice * 0.35));
             var targetOnCorrectSide = calculated &&
-                directionalReward > Math.Max(Symbol.TickSize * 2.0, Symbol.Spread * 1.5);
+                directionalReward > minimumQualityTargetDistance;
             var requiredMinimumRewardRisk = Math.Max(MinimumQualityRewardRisk, MinimumPreTradeRewardRisk);
             var maximumAllowedSpreadToAtr = Math.Min(MaximumQualitySpreadToAtr, MaxSpreadToAtrRatio);
             var maximumAllowedStopDistanceAtr = Math.Min(MaximumQualityStopDistanceAtr, MaximumPreTradeStopDistanceAtr);
@@ -1095,7 +1102,7 @@ namespace CTStopBot
                 var displayedTargetPrice = PredictDisplayedMarketGuidePrice(
                     sideKey + "_TP", tradeType, targetPrice, atrPrice, true, false);
 
-                var minimumVisibleTargetDistance = Math.Max(Symbol.TickSize * 2.0, Symbol.Spread * 1.5);
+                var minimumVisibleTargetDistance = minimumQualityTargetDistance;
                 var displayedStopDistanceAtr = atrPrice > 0.0
                     ? Math.Abs(displayedEntryPrice - displayedStopPrice) / atrPrice
                     : double.MaxValue;
@@ -1597,50 +1604,6 @@ namespace CTStopBot
         {
             var direction = position.TradeType == TradeType.Buy ? 1.0 : -1.0;
             return direction * (position.EntryPrice - position.StopLoss.Value) > Symbol.TickSize;
-        }
-
-        private bool TryGetGuideCostAdjustedRewardRisk(
-            double entryPrice,
-            double stopPrice,
-            double targetPrice,
-            TradeType tradeType,
-            out double rewardRisk)
-        {
-            rewardRisk = 0.0;
-            if (Symbol.PipSize <= 0 || Symbol.TickSize <= 0 ||
-                !IsFiniteNumber(entryPrice) || !IsFiniteNumber(stopPrice) || !IsFiniteNumber(targetPrice))
-                return false;
-
-            var direction = tradeType == TradeType.Buy ? 1.0 : -1.0;
-            var riskDistance = direction * (entryPrice - stopPrice);
-            var rewardDistance = direction * (targetPrice - entryPrice);
-            var costReserve = Math.Max(Symbol.Spread, Symbol.TickSize)
-                + SlippageReservePips * Symbol.PipSize;
-            return RiskRewardEngine.TryCalculateNetRewardRisk(
-                riskDistance, rewardDistance, costReserve, out rewardRisk);
-        }
-
-        private bool TryGetCostAdjustedRewardRisk(
-            double entryPrice,
-            double stopPrice,
-            double targetPrice,
-            TradeType tradeType,
-            out double rewardRisk)
-        {
-            rewardRisk = 0.0;
-            if (Symbol.PipSize <= 0 || Symbol.TickSize <= 0 ||
-                !IsFiniteNumber(entryPrice) || !IsFiniteNumber(stopPrice) || !IsFiniteNumber(targetPrice))
-                return false;
-
-            var direction = tradeType == TradeType.Buy ? 1.0 : -1.0;
-            var riskDistance = direction * (entryPrice - stopPrice);
-            var rewardDistance = direction * (targetPrice - entryPrice);
-            var costReserve = Math.Max(Symbol.Spread, Symbol.TickSize)
-                + SlippageReservePips * Symbol.PipSize;
-            return RiskRewardEngine.TryCalculateNetRewardRisk(
-                riskDistance, rewardDistance, costReserve, out rewardRisk) &&
-                RiskRewardEngine.MeetsMinimumNetRewardRisk(
-                    rewardRisk, Math.Max(MinimumQualityRewardRisk, MinimumPreTradeRewardRisk));
         }
 
         private double GetCurrentAtrPrice()
