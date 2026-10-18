@@ -142,7 +142,7 @@ namespace CTStopBot
         private readonly Dictionary<string, DateTime> _marketGuideStartTimes = new Dictionary<string, DateTime>();
         private readonly Dictionary<string, string> _marketGuideContexts = new Dictionary<string, string>();
         private const int GuideLineBarsLeft = 20;
-        private const int GuideLineBarsRight = 40;
+        private const int GuideLineBarsRight = 20;
         protected override void OnStart()
         {
             if (TimeFrame != cAlgo.API.TimeFrame.Minute5)
@@ -1267,11 +1267,13 @@ namespace CTStopBot
 
         private double GetGuideLabelOffsetPrice(double atrPrice)
         {
-            var offset = Math.Max(Symbol.TickSize * 4.0, Symbol.PipSize * 2.0);
+            // A modest price-space gap keeps the 14px label clear of a 1px guide line
+            // without letting labels drift far away in volatile or high-spread markets.
+            var offset = Math.Max(Symbol.TickSize * 6.0, Symbol.PipSize * 3.0);
             if (IsFinitePositive(atrPrice))
-                offset = Math.Max(offset, atrPrice * 0.035);
+                offset = Math.Max(offset, atrPrice * 0.05);
             if (IsFinitePositive(Symbol.Spread))
-                offset = Math.Max(offset, Symbol.Spread * 1.25);
+                offset = Math.Max(offset, Symbol.Spread * 1.5);
 
             return offset;
         }
