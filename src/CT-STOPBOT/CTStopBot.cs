@@ -169,7 +169,7 @@ namespace CTStopBot
         private readonly Dictionary<string, DateTime> _marketGuideStartTimes = new Dictionary<string, DateTime>();
         private readonly Dictionary<string, string> _marketGuideContexts = new Dictionary<string, string>();
         private const int GuideLineBarsLeft = 20;
-        private const int GuideLineBarsRight = 20;
+        private const int GuideLineBarsRight = 40;
         private const double MinimumQualityRewardRisk = 1.8;
         private const double MaximumQualitySpreadToAtr = 0.16;
         private const double MaximumQualityStopDistanceAtr = 2.25;
@@ -804,6 +804,9 @@ namespace CTStopBot
                     RemoveMarketGuideObject("SELL_ENTRY");
                     RemoveMarketGuideObject("SELL_SL");
                     RemoveMarketGuideObject("SELL_TP");
+                    DrawMarketStatusText(string.Format(
+                        "CT-STOPBOT | WAITING FOR VALID M5 DATA (bars={0}; at least {1} bars plus valid quote/ATR/EMA/RSI required)",
+                        Bars.Count, Math.Max(52, Math.Max(TpStructureLookback + 1, AtrPeriod + 2))));
                     return;
                 }
 
@@ -813,6 +816,8 @@ namespace CTStopBot
                     trendText, momentumText, overextended, out buyStatus);
                 UpdateOneSideGuidance(TradeType.Sell, signalScore, atrPrice, rsi, spreadToAtr,
                     trendText, momentumText, overextended, out sellStatus);
+
+                DrawMarketStatusText("CT-STOPBOT | BUY: " + buyStatus + "\nSELL: " + sellStatus);
 
             }
             catch (Exception ex)
@@ -1015,16 +1020,7 @@ namespace CTStopBot
                     RemoveMarketGuideObject(sideKey + "_ENTRY");
                     RemoveMarketGuideObject(sideKey + "_SL");
                     RemoveMarketGuideObject(sideKey + "_TP");
-                    sideStatus = "waiting for valid data";
-                    return;
-                }
-
-                if (!highConfidence)
-                {
-                    RemoveMarketGuideObject(sideKey + "_ENTRY");
-                    RemoveMarketGuideObject(sideKey + "_SL");
-                    RemoveMarketGuideObject(sideKey + "_TP");
-                    sideStatus = setupQuality;
+                    sideStatus = "WAIT — waiting for valid structure/history";
                     return;
                 }
 
@@ -1032,9 +1028,14 @@ namespace CTStopBot
                 var entryColor = highConfidence
                     ? Color.FromHex("#E8C45B")
                     : tradeType == TradeType.Buy ? Color.FromHex("#477C89") : Color.FromHex("#936174");
-                var stopColor = highConfidence ? Color.FromHex("#D8757B") : Color.FromHex("#A45F68");
-                var targetColor = highConfidence ? Color.FromHex("#55B79E") : Color.FromHex("#438D7F");
+                var stopColor = highConfidence && stopIsSafe
+                    ? Color.FromHex("#D8757B") : Color.FromHex("#A45F68");
+                var targetColor = highConfidence
+                    ? Color.FromHex("#55B79E") : Color.FromHex("#438D7F");
 
+                // Draw guidance whenever a structural calculation exists. A setup that
+                // fails quality filters remains visible as dotted provisional guidance;
+                // it is not presented as a qualified entry and never places an order.
                 DrawOrUpdateMarketGuide(sideKey + "_ENTRY", tradeType, entryPrice,
                     marketReferencePrice, atrPrice, sideKey + " ENTRY", entryColor,
                     false, true, highConfidence);
@@ -1043,45 +1044,32 @@ namespace CTStopBot
                 if (!_marketGuidePrices.TryGetValue(sideKey + "_ENTRY", out displayedEntryPrice))
                     displayedEntryPrice = entryPrice;
 
-                // Recalculate risk/reward from the exact ENTRY price currently displayed.
-                // The entry line is smoothed to avoid jitter; never let an old displayed
-                // entry coexist with SL/TP levels whose geometry now fails the hard filters.
-                double displayedRewardRisk;
-                var displayedStopDistanceAtr = atrPrice > 0.0
-                    ? Math.Abs(displayedEntryPrice - stopPrice) / atrPrice
-                    : double.MaxValue;
-                if (!TryGetCostAdjustedRewardRisk(displayedEntryPrice, stopPrice, targetPrice,
-                        tradeType, out displayedRewardRisk) ||
-                    displayedStopDistanceAtr < MinimumQualityStopDistanceAtr ||
-                    displayedStopDistanceAtr > Math.Min(MaximumQualityStopDistanceAtr, MaximumPreTradeStopDistanceAtr))
-                {
-                    RemoveMarketGuideObject(sideKey + "_ENTRY");
-                    RemoveMarketGuideObject(sideKey + "_SL");
-                    RemoveMarketGuideObject(sideKey + "_TP");
-                    sideStatus = "WAIT — displayed ENTRY/SL/TP geometry failed the cost-adjusted R:R filter";
-                    return;
-                }
+                double retainedStopPrice;
+                if (!_marketGuidePrices.TryGetValue(sideKey + "_SL", out retainedStopPrice))
+                    retainedStopPrice = stopPrice;
+                var retainedStopOnCorrectSide =
+                    direction * (displayedEntryPrice - retainedStopPrice) > Symbol.TickSize;
 
-                // From this point the reported R:R/risk distance matches the displayed
-                // ENTRY/SL/TP prices, rather than only the unsmoothed candidate values.
-                rewardRisk = displayedRewardRisk;
-                stopDistanceAtr = displayedStopDistanceAtr;
+                // Even a structurally-derived stop that currently violates the broker
+                // gap remains visible but is labelled with ! so it cannot be mistaken
+                // for a placeable SL. This is a visual guide only.
+                var stopTitle = sideKey + (stopIsSafe && retainedStopOnCorrectSide ? " SL" : " SL!");
+                DrawOrUpdateMarketGuide(sideKey + "_SL", tradeType, stopPrice,
+                    displayedEntryPrice, atrPrice, stopTitle, stopColor,
+                    false, false, highConfidence);
 
-                if (stopIsSafe)
-                {
-                    DrawOrUpdateMarketGuide(sideKey + "_SL", tradeType, stopPrice,
-                        displayedEntryPrice, atrPrice, sideKey + " SL", stopColor,
-                        false, false, highConfidence);
-                }
-                else
-                {
-                    RemoveMarketGuideObject(sideKey + "_SL");
-                }
+                double retainedTargetPrice;
+                if (!_marketGuidePrices.TryGetValue(sideKey + "_TP", out retainedTargetPrice))
+                    retainedTargetPrice = targetPrice;
+                var minimumVisibleTargetDistance = Math.Max(Symbol.TickSize * 2.0, Symbol.Spread * 1.5);
+                var retainedTargetOnCorrectSide =
+                    direction * (retainedTargetPrice - displayedEntryPrice) > minimumVisibleTargetDistance;
 
                 if (ShowSuggestedTpLine)
                 {
+                    var targetTitle = sideKey + (retainedTargetOnCorrectSide ? " TP" : " TP!");
                     DrawOrUpdateMarketGuide(sideKey + "_TP", tradeType, targetPrice,
-                        displayedEntryPrice, atrPrice, sideKey + " TP", targetColor,
+                        displayedEntryPrice, atrPrice, targetTitle, targetColor,
                         true, false, highConfidence);
                 }
                 else
@@ -1089,40 +1077,56 @@ namespace CTStopBot
                     RemoveMarketGuideObject(sideKey + "_TP");
                 }
 
-                // Final acceptance uses the prices actually retained by the chart objects.
-                // Independent smoothing of ENTRY, SL and TP must never leave a displayed
-                // ratio that differs from the ratio accepted by the setup calculator.
-                double renderedStopPrice;
-                double renderedTargetPrice = targetPrice;
-                double renderedRewardRisk;
-                var hasRenderedStop = _marketGuidePrices.TryGetValue(
-                    sideKey + "_SL", out renderedStopPrice);
+                // Validate the prices actually retained by the chart's smoothing logic,
+                // but do not delete lines merely because the setup is not high-confidence.
+                double displayedStopPrice;
+                var hasRenderedStop = _marketGuidePrices.TryGetValue(sideKey + "_SL", out displayedStopPrice);
+                double displayedTargetPrice;
                 var hasRenderedTarget = !ShowSuggestedTpLine ||
-                    _marketGuidePrices.TryGetValue(sideKey + "_TP", out renderedTargetPrice);
-                var renderedStopDistanceAtr = atrPrice > 0.0
-                    ? Math.Abs(displayedEntryPrice - renderedStopPrice) / atrPrice
-                    : double.MaxValue;
-                var renderedDirectionalRisk = direction * (displayedEntryPrice - renderedStopPrice);
-                var renderedDirectionalReward = direction * (renderedTargetPrice - displayedEntryPrice);
-                if (!hasRenderedStop || !hasRenderedTarget ||
-                    renderedDirectionalRisk < minimumStructuralRisk ||
-                    renderedDirectionalReward <= Math.Max(Symbol.TickSize * 2.0, Symbol.Spread * 1.5) ||
-                    renderedStopDistanceAtr < MinimumQualityStopDistanceAtr ||
-                    renderedStopDistanceAtr > Math.Min(MaximumQualityStopDistanceAtr, MaximumPreTradeStopDistanceAtr) ||
-                    !TryGetCostAdjustedRewardRisk(displayedEntryPrice, renderedStopPrice,
-                        renderedTargetPrice, tradeType, out renderedRewardRisk))
-                {
-                    RemoveMarketGuideObject(sideKey + "_ENTRY");
-                    RemoveMarketGuideObject(sideKey + "_SL");
-                    RemoveMarketGuideObject(sideKey + "_TP");
-                    sideStatus = "WAIT — displayed ENTRY/SL/TP levels fail risk/reward geometry";
-                    return;
-                }
+                    _marketGuidePrices.TryGetValue(sideKey + "_TP", out displayedTargetPrice);
+                if (!hasRenderedStop)
+                    displayedStopPrice = stopPrice;
+                if (!hasRenderedTarget)
+                    displayedTargetPrice = targetPrice;
 
-                rewardRisk = renderedRewardRisk;
-                stopDistanceAtr = renderedStopDistanceAtr;
-                sideStatus = string.Format("QUALIFIED | net R:R {0:F2} | risk {1:F2} ATR | displayed prices validated",
-                    rewardRisk, stopDistanceAtr);
+                var displayedStopDistanceAtr = atrPrice > 0.0
+                    ? Math.Abs(displayedEntryPrice - displayedStopPrice) / atrPrice
+                    : double.MaxValue;
+                var displayedDirectionalRisk = direction * (displayedEntryPrice - displayedStopPrice);
+                var displayedDirectionalReward = direction * (displayedTargetPrice - displayedEntryPrice);
+                double displayedRewardRisk;
+                var hasDisplayedRewardRisk = ShowSuggestedTpLine &&
+                    TryGetGuideCostAdjustedRewardRisk(displayedEntryPrice, displayedStopPrice,
+                        displayedTargetPrice, tradeType, out displayedRewardRisk);
+                if (!hasDisplayedRewardRisk)
+                    displayedRewardRisk = 0.0;
+
+                var renderedHighConfidence = highConfidence && hasRenderedStop &&
+                    stopIsSafe && displayedDirectionalRisk >= minimumStructuralRisk &&
+                    (!ShowSuggestedTpLine || (hasRenderedTarget &&
+                    displayedDirectionalReward > minimumVisibleTargetDistance &&
+                    hasDisplayedRewardRisk && displayedRewardRisk >= requiredMinimumRewardRisk)) &&
+                    displayedStopDistanceAtr >= MinimumQualityStopDistanceAtr &&
+                    displayedStopDistanceAtr <= maximumAllowedStopDistanceAtr;
+
+                if (!stopIsSafe || displayedDirectionalRisk < minimumStructuralRisk)
+                    sideStatus = "PROVISIONAL — lines shown; SL! unsafe/too close to ENTRY";
+                else if (ShowSuggestedTpLine && displayedDirectionalReward <= minimumVisibleTargetDistance)
+                    sideStatus = "PROVISIONAL — lines shown; TP! too close to ENTRY";
+                else if (!hasDisplayedRewardRisk && ShowSuggestedTpLine)
+                    sideStatus = "WAIT — lines shown, but displayed prices do not form valid risk/reward";
+                else if (ShowSuggestedTpLine && displayedRewardRisk < requiredMinimumRewardRisk)
+                    sideStatus = string.Format("WAIT — provisional lines shown; net R:R {0:F2} below {1:F2}",
+                        displayedRewardRisk, requiredMinimumRewardRisk);
+                else if (displayedStopDistanceAtr < MinimumQualityStopDistanceAtr ||
+                    displayedStopDistanceAtr > maximumAllowedStopDistanceAtr)
+                    sideStatus = "WAIT — provisional lines shown; SL distance outside quality range";
+                else if (!renderedHighConfidence)
+                    sideStatus = setupQuality + " | provisional guides shown";
+                else
+                    sideStatus = string.Format("QUALIFIED | net R:R {0:F2} | risk {1:F2} ATR",
+                        displayedRewardRisk, displayedStopDistanceAtr);
+
                 return;
             }
 
@@ -1455,7 +1459,7 @@ namespace CTStopBot
 
             if (!hasPrevious || priceChanged || styleChanged || levelReached || newBar)
             {
-                var style = isEntry && !highConfidence ? LineStyle.Dots : LineStyle.Solid;
+                var style = !highConfidence ? LineStyle.Dots : LineStyle.Solid;
                 var line = Chart.DrawTrendLine(lineName, startBarIndex, displayPrice, endBarIndex, displayPrice,
                     color, 1, style);
                 line.ExtendToInfinity = false;
@@ -1492,6 +1496,33 @@ namespace CTStopBot
         {
             var direction = position.TradeType == TradeType.Buy ? 1.0 : -1.0;
             return direction * (position.EntryPrice - position.StopLoss.Value) > Symbol.TickSize;
+        }
+
+        private bool TryGetGuideCostAdjustedRewardRisk(
+            double entryPrice,
+            double stopPrice,
+            double targetPrice,
+            TradeType tradeType,
+            out double rewardRisk)
+        {
+            rewardRisk = 0.0;
+            if (Symbol.PipSize <= 0 || Symbol.TickSize <= 0 ||
+                !IsFiniteNumber(entryPrice) || !IsFiniteNumber(stopPrice) || !IsFiniteNumber(targetPrice))
+                return false;
+
+            var direction = tradeType == TradeType.Buy ? 1.0 : -1.0;
+            var riskDistance = direction * (entryPrice - stopPrice);
+            var rewardDistance = direction * (targetPrice - entryPrice);
+            var costReserve = Math.Max(Symbol.Spread, Symbol.TickSize)
+                + SlippageReservePips * Symbol.PipSize;
+
+            if (riskDistance <= Symbol.TickSize || rewardDistance <= costReserve)
+                return false;
+
+            rewardRisk = (rewardDistance - costReserve) / (riskDistance + costReserve);
+            // Unlike the trading-quality filter, this helper returns any positive
+            // ratio so a provisional setup's actual displayed ratio can be reported.
+            return IsFiniteNumber(rewardRisk) && rewardRisk > 0.0;
         }
 
         private bool TryGetCostAdjustedRewardRisk(
@@ -1563,6 +1594,15 @@ namespace CTStopBot
             _marketGuideUpdatedAt.Remove(key);
             _marketGuideContexts.Remove(key);
             _marketGuideStartTimes.Remove(key);
+        }
+
+        private void DrawMarketStatusText(string message)
+        {
+            var status = Chart.DrawStaticText("CTSTOPBOT_MARKET_STATUS", message,
+                VerticalAlignment.Top, HorizontalAlignment.Left, Color.FromHex("#D6DDE7"));
+            status.FontSize = 11;
+            status.FontFamily = "Segoe UI";
+            status.IsBold = false;
         }
 
         private void RemoveAllPreTradeGuideObjects()
