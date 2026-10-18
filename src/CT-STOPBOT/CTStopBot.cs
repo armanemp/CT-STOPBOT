@@ -368,8 +368,24 @@ namespace CTStopBot
             var minimumBarsRequired = Math.Max(Math.Max(SwingLookback + 1, AtrPeriod + 2), WickClusterLookbackBars + 1);
             if (Bars.Count < minimumBarsRequired)
             {
+                // If a manual position is still naked, do not leave it waiting indefinitely
+                // for the history needed by the structural model. A clearly labelled
+                // emergency stop can protect it, but it is not a substitute for structure.
+                if (!position.StopLoss.HasValue && EnableInitialStopPlacement)
+                {
+                    double emergencyStop;
+                    if (TryCalculateEmergencyInitialStop(position, out emergencyStop))
+                    {
+                        NotifyThrottled(position.Id,
+                            "WARNING: M5 history is incomplete. Installing an emergency entry/market-gap SL without swing validation; review its risk immediately.");
+                        TryModifyStop(position, emergencyStop, true, 0.0,
+                            "emergency initial protection (insufficient history)");
+                        return;
+                    }
+                }
+
                 NotifyThrottled(position.Id,
-                    string.Format("Not enough M5 history: {0} bars available, at least {1} required for the configured swing/ATR settings. Stop calculation is waiting.",
+                    string.Format("Not enough M5 history: {0} bars available, at least {1} required. Structural stop calculation is waiting; if emergency protection was not placeable, the position may remain unprotected.",
                         Bars.Count, minimumBarsRequired));
                 return;
             }
@@ -387,8 +403,18 @@ namespace CTStopBot
                 double initialStop;
                 if (!TryCalculateStructuralStop(position, InitialAtrBuffer, true, out initialStop))
                 {
+                    double emergencyStop;
+                    if (TryCalculateEmergencyInitialStop(position, out emergencyStop))
+                    {
+                        NotifyThrottled(position.Id,
+                            "WARNING: structural SL calculation failed. Installing an emergency entry/market-gap SL; it has no confirmed swing anchor and needs immediate review.");
+                        TryModifyStop(position, emergencyStop, true, 0.0,
+                            "emergency initial protection (structure unavailable)");
+                        return;
+                    }
+
                     NotifyThrottled(position.Id,
-                        "Initial stop was not submitted: no safe closed-candle swing price is currently available. The position may remain unprotected; check logs and broker rules.");
+                        "Initial stop was not submitted: neither a safe closed-candle swing nor emergency market-gap level is placeable. The position may remain unprotected; check quote/broker rules immediately.");
                     return;
                 }
 
@@ -2060,6 +2086,35 @@ namespace CTStopBot
                 return false;
 
             return true;
+        }
+
+        private bool TryCalculateEmergencyInitialStop(Position position, out double stopPrice)
+        {
+            stopPrice = 0.0;
+            if (position == null || Symbol.PipSize <= 0 || Symbol.TickSize <= 0 ||
+                !IsFinitePositive(Symbol.Bid) || !IsFinitePositive(Symbol.Ask) ||
+                Symbol.Ask < Symbol.Bid)
+                return false;
+
+            var direction = position.TradeType == TradeType.Buy ? 1.0 : -1.0;
+            var brokerGap = GetRequiredMarketGap(position.TradeType);
+            var spreadGap = Math.Max(Symbol.Spread, Symbol.TickSize) * SpreadBufferMultiplier;
+            var minimumWickGap = MinimumWickBufferPips * Symbol.PipSize;
+            var gapFromQuote = Math.Max(brokerGap, Math.Max(spreadGap, minimumWickGap));
+            var gapFromEntry = Math.Max(Symbol.TickSize, minimumWickGap);
+
+            // The emergency price must both satisfy the live broker/market gap and
+            // stay on the loss side of ENTRY, so this protection cannot manufacture R
+            // from a stop already in profit.
+            var rawPrice = position.TradeType == TradeType.Buy
+                ? Math.Min(position.EntryPrice - gapFromEntry, Symbol.Bid - gapFromQuote)
+                : Math.Max(position.EntryPrice + gapFromEntry, Symbol.Ask + gapFromQuote);
+
+            stopPrice = NormalizeStopPrice(rawPrice, position.TradeType);
+            if (!IsSafeRelativeToMarket(stopPrice, position.TradeType))
+                return false;
+
+            return direction * (position.EntryPrice - stopPrice) > Symbol.TickSize;
         }
 
         private bool TryGetWickAwareStructureExtremes(
