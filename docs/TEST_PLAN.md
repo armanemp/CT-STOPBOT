@@ -10,6 +10,9 @@ Do not skip these tests before live use. Record the broker, account type, symbol
 - [ ] Start on a non-Gold symbol; confirm it stops.
 - [ ] Confirm the broker's symbol alias and configure the symbol filter if required.
 - [ ] Confirm whether all Gold positions should be managed or enable label restriction.
+- [ ] Verify startup diagnostics show correct pip/tick sizes, current spread, minimum stop distance, and distance units.
+- [ ] Verify initial-stop, break-even and structure-trailing switches can be tested independently.
+- [ ] Open a position with cTrader server-side trailing enabled; confirm the bot leaves it untouched by default.
 
 ## Initial protection
 
@@ -28,16 +31,20 @@ Do not skip these tests before live use. Record the broker, account type, symbol
 
 - [ ] Confirm no break-even move occurs before its configured estimated-cost threshold.
 - [ ] Confirm the stop moves only when the candidate is more protective.
-- [ ] Confirm commission multiplier, spread, slippage and additional cost reserve change the estimated break-even offset as expected.
+- [ ] Confirm commission multiplier, minimum round-trip commission reserve, spread, slippage and additional cost reserve change the estimated break-even offset as expected.
+- [ ] Confirm already-accrued negative swap increases the required break-even offset; positive swap does not reduce the conservative cost estimate.
+- [ ] Confirm the stop modification preserves the existing take-profit and stop trigger method.
 - [ ] Test both Buy and Sell in a widening spread; observe whether stop candidates are skipped safely.
 - [ ] Verify realised net P/L after stop closure, not merely the displayed stop price.
 - [ ] Let price make higher lows/lower highs; confirm trailing follows closed-candle structure and never loosens the stop.
-- [ ] Confirm trailing respects the configured minimum improvement step.
+- [ ] Confirm trailing respects the configured minimum improvement step even when a break-even candidate is also eligible.
 - [ ] Confirm the bot does not modify other symbols or excluded labels.
 
 ## Resilience
 
 - [ ] Check log output on broker rejection and ensure it never claims a failed stop was set.
+- [ ] Observe one forced/induced management exception if feasible; confirm the bot logs it and continues servicing other positions.
+- [ ] Check that setting `Manage positions with server-side trailing` off prevents conflicts with native trailing positions.
 - [ ] Restart the cBot with a protected position; confirm it keeps and only tightens the existing stop.
 - [ ] Restart the cBot with an unprotected position; confirm it retries an initial stop.
 - [ ] Observe behaviour through a temporary connection interruption and during high-spread/rollover periods.
