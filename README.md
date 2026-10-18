@@ -21,6 +21,8 @@ Initial target: XAUUSD / Gold on the 5-minute chart. The first iteration focuses
 - Keeps stop-management state keyed by position ID, so multiple matching-symbol positions are processed independently. By default, all labels on the chart symbol are eligible, including manual positions; other cBots on that symbol may also be affected. Native server-side trailing positions are left alone by default. Positions carrying native server-side break-even are skipped until the typed API is verified against the pinned package and demo-tested.
 - Supports a minimum commission-cost reserve for broker schedules where the observed opening commission is zero or below the true round-trip minimum.
 - Draws a short, dotted, per-position suggested TP line (green for Buy, red for Sell) based on closed-candle EMA 9/21, 3-bar momentum, RSI 14, ATR distance, and a nearby historical support/resistance level. A movement threshold and cooldown suppress small fluctuations; if price reaches the current suggestion, the line is recalculated promptly. The line is informational only and never creates or changes an actual TP order.
+- Shows pre-entry BUY and SELL scenarios before a trade: candidate SL/TP levels, reward-to-risk estimate, trend (EMA 9/21/50), three-bar momentum, RSI, ATR regime, spread-to-ATR condition, and a heuristic alignment index. SL scenarios are hidden for a direction once all matching open positions have protection; if any matching position is unprotected, the panel warns explicitly. The live TP line remains independently attached to each open position after entry.
+- Pre-entry prices use closed-candle structure plus current ATR/spread and broker distance checks. Lines are smoothed by minimum-move thresholds/cooldown and TP suggestions refresh promptly after their target is reached. The alignment index is not a probability, the display does not generate entry orders, and a visible candidate is never an active stop/TP order.
 
 ## Repository workflow (Windows)
 
@@ -40,7 +42,7 @@ The cTrader.Automate build targets the `.algo` artifact and publishes it to the 
 
 This is an early engineering baseline, not a guarantee of profit or loss-free execution. A cBot cannot guarantee that a stop is installed before the next price movement, and a broker can reject a stop that violates minimum-distance or market rules. Stop execution can slip in fast markets. Commission, swaps, conversion fees and minimum stop distances vary by broker and account; verify them with your broker and configure the reserves accordingly.
 
-The break-even calculation is a conservative estimate, not a broker-certified net P/L calculation. The initial stop uses recent candle structure, not a promise that a candle wick is the objectively best stop location. The cBot does not calculate position size or guarantee a maximum cash risk. The TP suggestion is a visual scenario, not a forecast guarantee; the cBot never submits or edits an actual take-profit order.
+The break-even calculation is a conservative estimate, not a broker-certified net P/L calculation. The initial stop uses recent candle structure, not a promise that a candle wick is the objectively best stop location. The cBot does not calculate position size or guarantee a maximum cash risk. Pre-entry SL/TP lines and the market-condition panel are decision support, not entry signals or active orders. Their alignment index is heuristic and has not been statistically calibrated. The TP suggestion is not a forecast guarantee; the cBot never submits or edits an actual take-profit order.
 
 ## Test before live use
 
