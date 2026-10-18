@@ -84,6 +84,24 @@ namespace CTStopBot
         [Parameter("Swing lookback (closed M5 candles)", DefaultValue = 5, MinValue = 2, MaxValue = 50)]
         public int SwingLookback { get; set; }
 
+        [Parameter("Wick-cluster lookback (closed M5 candles)", DefaultValue = 8, MinValue = 3, MaxValue = 50)]
+        public int WickClusterLookbackBars { get; set; }
+
+        [Parameter("Minimum matching long-wick candles", DefaultValue = 2, MinValue = 2, MaxValue = 20)]
+        public int WickClusterMinBars { get; set; }
+
+        [Parameter("Maximum body/range for wick cluster", DefaultValue = 0.35, MinValue = 0.05, MaxValue = 0.95)]
+        public double WickClusterMaxBodyRatio { get; set; }
+
+        [Parameter("Minimum relevant wick/range", DefaultValue = 0.40, MinValue = 0.05, MaxValue = 0.95)]
+        public double WickClusterMinShadowRatio { get; set; }
+
+        [Parameter("Wick-cluster ATR buffer multiplier", DefaultValue = 0.20, MinValue = 0.0, MaxValue = 2.0)]
+        public double WickClusterAtrBufferMultiplier { get; set; }
+
+        [Parameter("Wick-cluster spread buffer multiplier", DefaultValue = 0.75, MinValue = 0.0, MaxValue = 5.0)]
+        public double WickClusterSpreadBufferMultiplier { get; set; }
+
         [Parameter("ATR period", DefaultValue = 14, MinValue = 2, MaxValue = 100)]
         public int AtrPeriod { get; set; }
 
@@ -184,6 +202,15 @@ namespace CTStopBot
 
             if (Symbol.PipValue <= 0)
                 Print("WARNING: Symbol.PipValue is not positive; cost-aware break-even will be unavailable until the symbol/account metadata provides a valid value.");
+
+            if (WickClusterMinBars > WickClusterLookbackBars ||
+                WickClusterMaxBodyRatio <= 0.0 || WickClusterMaxBodyRatio >= 1.0 ||
+                WickClusterMinShadowRatio <= 0.0 || WickClusterMinShadowRatio >= 1.0)
+            {
+                Print("CT-STOPBOT stopped: invalid wick-cluster settings. Minimum cluster count must not exceed lookback and body/shadow ratios must be inside (0,1).");
+                Stop();
+                return;
+            }
 
             LocalStorage.Reload(LocalStorageScope.Device);
             Chart.RemoveObject("CTSTOPBOT_MARKET_STATUS");
@@ -333,7 +360,7 @@ namespace CTStopBot
                 return;
             }
 
-            var minimumBarsRequired = Math.Max(SwingLookback + 1, AtrPeriod + 2);
+            var minimumBarsRequired = Math.Max(Math.Max(SwingLookback + 1, AtrPeriod + 2), WickClusterLookbackBars + 1);
             if (Bars.Count < minimumBarsRequired)
             {
                 NotifyThrottled(position.Id,
@@ -1167,25 +1194,30 @@ namespace CTStopBot
             var marketReferencePrice = tradeType == TradeType.Buy ? Symbol.Ask : Symbol.Bid;
             entryPrice = marketReferencePrice;
 
-            var swingLow = double.MaxValue;
-            var swingHigh = double.MinValue;
-            var firstSwingIndex = lastClosedIndex - SwingLookback + 1;
-            for (var i = firstSwingIndex; i <= lastClosedIndex; i++)
-            {
-                swingLow = Math.Min(swingLow, Bars.LowPrices[i]);
-                swingHigh = Math.Max(swingHigh, Bars.HighPrices[i]);
-            }
+            double swingLow;
+            double swingHigh;
+            bool lowerWickCluster;
+            bool upperWickCluster;
+            if (!TryGetWickAwareStructureExtremes(lastClosedIndex,
+                    out swingLow, out swingHigh, out lowerWickCluster, out upperWickCluster))
+                return false;
 
             var atrBuffer = atrPrice * InitialAtrBuffer;
             var spreadBuffer = Math.Max(Symbol.Spread, Symbol.TickSize) * SpreadBufferMultiplier;
             var minimumBuffer = MinimumWickBufferPips * Symbol.PipSize;
             var stopBuffer = Math.Max(minimumBuffer, Math.Max(atrBuffer, spreadBuffer));
+            var relevantWickCluster = tradeType == TradeType.Buy ? lowerWickCluster : upperWickCluster;
+            if (relevantWickCluster)
+                stopBuffer = Math.Max(stopBuffer, Math.Max(
+                    atrPrice * WickClusterAtrBufferMultiplier,
+                    Symbol.Spread * WickClusterSpreadBufferMultiplier));
+
             var pivotLookback = Math.Max(SwingLookback, ConfirmedPivotStrength * 2 + 3);
-            double pivotAnchor;
+            double pivotAnchor = 0.0;
             var stopBoundary = tradeType == TradeType.Buy
                 ? Symbol.Bid - GetRequiredMarketGap(tradeType) + stopBuffer
                 : Symbol.Ask + GetRequiredMarketGap(tradeType) - stopBuffer;
-            stopUsesPivot = TryFindLatestConfirmedPivot(
+            stopUsesPivot = !relevantWickCluster && TryFindLatestConfirmedPivot(
                 tradeType == TradeType.Buy, lastClosedIndex, pivotLookback,
                 stopBoundary, tradeType == TradeType.Buy, out pivotAnchor);
             if (stopUsesPivot)
@@ -1829,25 +1861,84 @@ namespace CTStopBot
             return true;
         }
 
+        private bool TryGetWickAwareStructureExtremes(
+            int lastClosedIndex,
+            out double swingLow,
+            out double swingHigh,
+            out bool lowerWickCluster,
+            out bool upperWickCluster)
+        {
+            swingLow = 0.0;
+            swingHigh = 0.0;
+            lowerWickCluster = false;
+            upperWickCluster = false;
+
+            var lookback = Math.Max(3, WickClusterLookbackBars);
+            var firstIndex = lastClosedIndex - lookback + 1;
+            if (lastClosedIndex < 0 || firstIndex < 0)
+                return false;
+
+            var fullLow = double.MaxValue;
+            var fullHigh = double.MinValue;
+            var recentLow = double.MaxValue;
+            var recentHigh = double.MinValue;
+            var recentStart = Math.Max(firstIndex, lastClosedIndex - 2);
+            var lowerCount = 0;
+            var upperCount = 0;
+
+            for (var i = firstIndex; i <= lastClosedIndex; i++)
+            {
+                var open = Bars.OpenPrices[i];
+                var high = Bars.HighPrices[i];
+                var low = Bars.LowPrices[i];
+                var close = Bars.ClosePrices[i];
+                var range = high - low;
+                fullLow = Math.Min(fullLow, low);
+                fullHigh = Math.Max(fullHigh, high);
+
+                if (i >= recentStart)
+                {
+                    recentLow = Math.Min(recentLow, low);
+                    recentHigh = Math.Max(recentHigh, high);
+                }
+
+                if (range <= Symbol.TickSize)
+                    continue;
+
+                var bodyRatio = Math.Abs(close - open) / range;
+                var lowerShadowRatio = (Math.Min(open, close) - low) / range;
+                var upperShadowRatio = (high - Math.Max(open, close)) / range;
+                if (bodyRatio <= WickClusterMaxBodyRatio && lowerShadowRatio >= WickClusterMinShadowRatio)
+                    lowerCount++;
+                if (bodyRatio <= WickClusterMaxBodyRatio && upperShadowRatio >= WickClusterMinShadowRatio)
+                    upperCount++;
+            }
+
+            lowerWickCluster = lowerCount >= WickClusterMinBars;
+            upperWickCluster = upperCount >= WickClusterMinBars;
+            swingLow = lowerWickCluster ? fullLow : recentLow;
+            swingHigh = upperWickCluster ? fullHigh : recentHigh;
+
+            return IsFinitePositive(swingLow) && IsFinitePositive(swingHigh) && swingHigh >= swingLow;
+        }
+
         private bool TryCalculateStructuralStop(Position position, double atrMultiplier, bool allowFallback, out double stopPrice)
         {
             stopPrice = 0.0;
 
             var lastClosedIndex = Bars.Count - 2;
-            if (lastClosedIndex < 0 || lastClosedIndex + 1 < SwingLookback)
+            if (lastClosedIndex < 0 || lastClosedIndex + 1 < Math.Max(SwingLookback, WickClusterLookbackBars))
                 return false;
 
-            // Use exactly the configured number of closed candles. Do not silently
-            // reduce the lookback when chart history has not loaded yet.
-            var firstIndex = lastClosedIndex - SwingLookback + 1;
-            var swingLow = double.MaxValue;
-            var swingHigh = double.MinValue;
-
-            for (var i = firstIndex; i <= lastClosedIndex; i++)
-            {
-                swingLow = Math.Min(swingLow, Bars.LowPrices[i]);
-                swingHigh = Math.Max(swingHigh, Bars.HighPrices[i]);
-            }
+            // The full closed-bar range is used only when a multi-candle long-wick
+            // rejection cluster is present; otherwise use the most recent three bars.
+            double swingLow;
+            double swingHigh;
+            bool lowerWickCluster;
+            bool upperWickCluster;
+            if (!TryGetWickAwareStructureExtremes(lastClosedIndex,
+                    out swingLow, out swingHigh, out lowerWickCluster, out upperWickCluster))
+                return false;
 
             var atrPrice = _atr != null && lastClosedIndex < _atr.Result.Count
                 ? _atr.Result[lastClosedIndex]
@@ -1860,11 +1951,19 @@ namespace CTStopBot
             var atrBuffer = atrPrice * atrMultiplier;
             var minimumBuffer = MinimumWickBufferPips * Symbol.PipSize;
             var buffer = Math.Max(minimumBuffer, Math.Max(spreadBuffer, atrBuffer));
+            var relevantWickCluster = position.TradeType == TradeType.Buy
+                ? lowerWickCluster
+                : upperWickCluster;
 
-            if (allowFallback)
+            if (relevantWickCluster)
+                buffer = Math.Max(buffer, Math.Max(
+                    atrPrice * WickClusterAtrBufferMultiplier,
+                    Symbol.Spread * WickClusterSpreadBufferMultiplier));
+
+            if (allowFallback && !relevantWickCluster)
             {
-                // Use the same confirmed-pivot rule as the pre-entry SL suggestion,
-                // so the initial stop does not silently switch to a different structure.
+                // A confirmed pivot is preferred only when repeated rejection wicks
+                // do not establish a more informative multi-candle cluster extreme.
                 var pivotLookback = Math.Max(SwingLookback, ConfirmedPivotStrength * 2 + 3);
                 double pivotAnchor;
                 var stopBoundary = position.TradeType == TradeType.Buy
