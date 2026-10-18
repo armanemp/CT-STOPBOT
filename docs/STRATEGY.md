@@ -4,7 +4,7 @@
 
 The bot manages existing positions; it does not create entries or change position volume. It is deliberately restricted to an M5 chart and a symbol containing the configured string (default XAUUSD). A broker may call Gold GOLD, XAUUSD., or another alias; adjust the symbol filter only after confirming the correct instrument.
 
-By default it manages all position labels on that symbol, including manual positions. Enable the label restriction when only a particular strategy's positions should be touched.
+By default it manages all position labels on that symbol, including manual positions. Enable the label restriction when only a particular strategy's positions should be touched. Use the feature switches to isolate initial-stop, break-even and structure-trailing behaviour during demo tests. Positions already using cTrader's server-side trailing stop are skipped by default to avoid competing stop managers; enable that option only after a dedicated test.
 
 ## Initial stop
 
@@ -30,6 +30,7 @@ The cBot estimates a stop price beyond entry using:
 - Slippage reserve (pips),
 - Additional cost reserve (account currency),
 - Minimum net lock (pips).
+- Minimum round-trip commission reserve (account currency), used as a floor when the observed opening commission is zero or below the broker's expected minimum.
 
 Break-even only becomes eligible after Position.Pips reaches this estimated offset plus Break-even activation extra. The candidate is accepted only when it improves the existing stop and is far enough from the current quote.
 
@@ -37,7 +38,9 @@ This is intentionally conservative and approximate. cTrader documents Position.C
 
 ## Trailing
 
-The bot uses the same closed-candle swing method with a separate ATR multiplier. A trailing candidate must tighten the existing stop by at least Trailing step (pips), except that a break-even improvement may move by one tick. The long-side stop can only rise; the short-side stop can only fall. The bot does not intentionally remove or loosen an existing stop.
+The bot uses the same closed-candle swing method with a separate ATR multiplier. A structure-trailing candidate must tighten the existing stop by at least Trailing step (pips). A break-even-only improvement may move by one tick. If a structural candidate supersedes a break-even candidate, the trailing-step threshold still applies. The long-side stop can only rise; the short-side stop can only fall. The bot does not intentionally remove or loosen an existing stop.
+
+By default, positions whose `HasTrailingStop` flag is already true are left untouched. This prevents the bot from competing with cTrader's server-side trailing engine. The modification call also preserves an eligible position's existing trailing flag and stop trigger method.
 
 One stop modification is attempted per position at a time. Failed changes are logged; retries are throttled. The cBot does not guarantee continuous server-side protection while a change is pending or rejected.
 
@@ -57,3 +60,12 @@ One stop modification is attempted per position at a time. Failed changes are lo
 - No stop is submitted if the candidate is unsafe relative to the current quote.
 - Failed modifications are logged, not represented as successful protection.
 - Do not connect to a live account until compile, demo, rejection and restart cases are tested.
+
+
+## Implemented defensive controls (current development branch)
+
+- Separate parameter switches allow initial stop placement, break-even, and structure trailing to be tested independently. Disabling initial stop placement can leave a position with no stop; it is a test control, not a safe live default.
+- Position management is wrapped in exception handling so one unexpected per-position exception is logged instead of terminating the entire per-tick loop.
+- Position modifications preserve take-profit, the server-side trailing flag, and the existing stop trigger method.
+- The final selected trailing candidate must still meet the trailing-step threshold; a break-even candidate does not accidentally waive that threshold if structural trailing supersedes it.
+- Minimum round-trip commission reserve can account for broker minimum commissions when the observed opening commission is zero or unusually small.
