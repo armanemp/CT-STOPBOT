@@ -20,6 +20,7 @@ Do not skip these tests before live use. Record the broker, account type, symbol
 - [ ] Start the cBot while an eligible position is already open without a stop; confirm it attempts protection.
 - [ ] Confirm the candidate is beyond the selected closed-candle swing and rounded to tick size.
 - [ ] Confirm stop placement respects the broker's minimum distance/freeze rules.
+- [ ] Force/observe a case where the candle-based level is too close to or through the current quote; confirm the fallback warning is visible and a broker rejection is never reported as success.
 
 ## Break-even and trailing
 
