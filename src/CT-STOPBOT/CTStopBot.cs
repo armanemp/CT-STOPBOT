@@ -257,7 +257,7 @@ namespace CTStopBot
                     ? position.EntryPrice + requiredOffsetPips * Symbol.PipSize
                     : position.EntryPrice - requiredOffsetPips * Symbol.PipSize;
 
-                breakEvenPrice = NormalizeStopPrice(breakEvenPrice, position.TradeType);
+                breakEvenPrice = NormalizeBreakEvenPrice(breakEvenPrice, position.TradeType);
 
                 if (IsSafeRelativeToMarket(breakEvenPrice, position.TradeType) &&
                     IsMoreProtective(breakEvenPrice, bestStop, position.TradeType))
@@ -433,6 +433,21 @@ namespace CTStopBot
             return minimumGap;
         }
 
+        private double NormalizeBreakEvenPrice(double price, TradeType tradeType)
+        {
+            if (Symbol.TickSize <= 0)
+                return Math.Round(price, Symbol.Digits, MidpointRounding.AwayFromZero);
+
+            // A break-even target must not be rounded below its intended profit offset:
+            // round Buy levels up and Sell levels down, then re-check broker/market distance.
+            var ticks = price / Symbol.TickSize;
+            var normalized = tradeType == TradeType.Buy
+                ? Math.Ceiling(ticks - 1e-10) * Symbol.TickSize
+                : Math.Floor(ticks + 1e-10) * Symbol.TickSize;
+
+            return Math.Round(normalized, Symbol.Digits, MidpointRounding.AwayFromZero);
+        }
+
         private bool IsSafeRelativeToMarket(double stopPrice, TradeType tradeType)
         {
             if (double.IsNaN(stopPrice) || double.IsInfinity(stopPrice) ||
@@ -504,7 +519,8 @@ namespace CTStopBot
             // Preserve the position's existing server-side trailing-stop flag and
             // stop trigger method while changing only the absolute stop price.
             var result = ModifyPosition(position, stopPrice, position.TakeProfit,
-                ProtectionType.Absolute, position.HasTrailingStop, position.StopLossTriggerMethod);
+                ProtectionType.Absolute, position.HasTrailingStop, position.StopLossTriggerMethod,
+                position.StopLossBreakEven);
 
             if (result.IsSuccessful)
             {
