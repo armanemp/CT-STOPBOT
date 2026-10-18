@@ -17,6 +17,18 @@ namespace CTStopBot
         [Parameter("Managed position label", DefaultValue = "CT-STOPBOT")]
         public string ManagedLabel { get; set; }
 
+        [Parameter("Enable initial stop placement", DefaultValue = true)]
+        public bool EnableInitialStopPlacement { get; set; }
+
+        [Parameter("Enable cost-aware break-even", DefaultValue = true)]
+        public bool EnableBreakEven { get; set; }
+
+        [Parameter("Enable structure trailing", DefaultValue = true)]
+        public bool EnableStructureTrailing { get; set; }
+
+        [Parameter("Manage positions with server-side trailing", DefaultValue = false)]
+        public bool ManagePositionsWithServerTrailing { get; set; }
+
         [Parameter("Swing lookback (closed M5 candles)", DefaultValue = 5, MinValue = 2, MaxValue = 50)]
         public int SwingLookback { get; set; }
 
@@ -43,6 +55,9 @@ namespace CTStopBot
 
         [Parameter("Round-trip commission multiplier", DefaultValue = 2.0, MinValue = 0.0, MaxValue = 5.0)]
         public double RoundTripCommissionMultiplier { get; set; }
+
+        [Parameter("Minimum round-trip commission reserve (account currency)", DefaultValue = 0.0, MinValue = 0.0)]
+        public double MinimumRoundTripCommissionReserve { get; set; }
 
         [Parameter("Additional cost reserve (account currency)", DefaultValue = 0.0, MinValue = 0.0)]
         public double AdditionalCostReserve { get; set; }
@@ -95,6 +110,8 @@ namespace CTStopBot
                 SymbolName, TimeFrame, RestrictToLabel ? " only when label matches '" + ManagedLabel + "'" : " regardless of label");
             Print("Symbol diagnostics: Bid={0}, Ask={1}, spread={2:F2} pips, PipSize={3}, TickSize={4}, PipValue={5}; broker min SL distance={6} {7}.",
                 Symbol.Bid, Symbol.Ask, spreadPips, Symbol.PipSize, Symbol.TickSize, Symbol.PipValue, Symbol.MinStopLossDistance, minDistanceUnit);
+            Print("Management switches: initial stop={0}, break-even={1}, structure trailing={2}, manage native trailing positions={3}, label filter={4}.",
+                EnableInitialStopPlacement, EnableBreakEven, EnableStructureTrailing, ManagePositionsWithServerTrailing, RestrictToLabel);
 
             // Protect eligible positions that were already open when the cBot started.
             foreach (var position in Positions)
@@ -155,8 +172,30 @@ namespace CTStopBot
 
         private void ManagePosition(Position position)
         {
+            try
+            {
+                ManagePositionCore(position);
+            }
+            catch (Exception ex)
+            {
+                if (position != null)
+                    NotifyThrottled(position.Id, "Unexpected exception during position management: " + ex.Message);
+                else
+                    Print("CT-STOPBOT warning: unexpected exception while managing a null position: {0}", ex.Message);
+            }
+        }
+
+        private void ManagePositionCore(Position position)
+        {
             if (!IsManaged(position))
                 return;
+
+            if (position.HasTrailingStop && !ManagePositionsWithServerTrailing)
+            {
+                NotifyThrottled(position.Id,
+                    "Position has a server-side trailing stop. CT-STOPBOT is leaving it untouched; enable the corresponding parameter only after testing how both trailing mechanisms interact.");
+                return;
+            }
 
             if (Bars.Count < 3)
             {
@@ -167,6 +206,13 @@ namespace CTStopBot
             // Never overwrite an existing stop with the initial structural stop.
             if (!position.StopLoss.HasValue)
             {
+                if (!EnableInitialStopPlacement)
+                {
+                    NotifyThrottled(position.Id,
+                        "Initial stop placement is disabled. This position remains unprotected unless another mechanism has installed a stop.");
+                    return;
+                }
+
                 double initialStop;
                 if (!TryCalculateStructuralStop(position, InitialAtrBuffer, out initialStop))
                 {
@@ -187,7 +233,8 @@ namespace CTStopBot
 
             // Cost-aware break-even estimate. Do not guess if pip value is unavailable.
             double requiredOffsetPips;
-            if (TryGetRequiredBreakEvenOffsetPips(position, out requiredOffsetPips) &&
+            if (EnableBreakEven &&
+                TryGetRequiredBreakEvenOffsetPips(position, out requiredOffsetPips) &&
                 position.Pips >= requiredOffsetPips + BreakEvenTriggerExtraPips)
             {
                 var breakEvenPrice = position.TradeType == TradeType.Buy
@@ -209,13 +256,17 @@ namespace CTStopBot
             // Trail behind recent CLOSED candle structure. Use max for Buy / min
             // for Sell so trailing cannot loosen a stop or a break-even level.
             double trailingStop;
-            if (TryCalculateStructuralStop(position, TrailingAtrBuffer, out trailingStop) &&
+            if (EnableStructureTrailing &&
+                TryCalculateStructuralStop(position, TrailingAtrBuffer, out trailingStop) &&
                 IsSafeRelativeToMarket(trailingStop, position.TradeType) &&
                 IsMoreProtective(trailingStop, bestStop, position.TradeType))
             {
                 bestStop = trailingStop;
                 hasBetterStop = true;
-                reason = breakEvenUpgrade ? "break-even + wick trailing" : "wick trailing";
+                // If the structural level supersedes the break-even candidate,
+                // it must still satisfy the configured trailing step.
+                breakEvenUpgrade = false;
+                reason = "wick trailing";
             }
 
             if (!hasBetterStop)
@@ -304,8 +355,12 @@ namespace CTStopBot
             // The multiplier estimates the round trip. Count already-accrued negative
             // swap as a cost; do not rely on future swap being predictable.
             var accruedNegativeSwapCash = Math.Max(0.0, -position.Swap);
+            var estimatedRoundTripCommissionCash =
+                Math.Max(Math.Abs(position.Commissions) * RoundTripCommissionMultiplier,
+                         MinimumRoundTripCommissionReserve);
+
             var estimatedCommissionCash =
-                Math.Abs(position.Commissions) * RoundTripCommissionMultiplier
+                estimatedRoundTripCommissionCash
                 + accruedNegativeSwapCash
                 + AdditionalCostReserve;
 
@@ -407,15 +462,22 @@ namespace CTStopBot
 
             _lastAttemptAt[position.Id] = Server.Time;
 
-            var result = ModifyPosition(position, stopPrice, position.TakeProfit, ProtectionType.Absolute);
+            // Preserve the position's existing server-side trailing-stop flag and
+            // stop trigger method while changing only the absolute stop price.
+            var result = ModifyPosition(position, stopPrice, position.TakeProfit,
+                ProtectionType.Absolute, position.HasTrailingStop, position.StopLossTriggerMethod);
+
             if (result.IsSuccessful)
             {
-                Print("Position {0}: {1} set/updated to {2}.", position.Id, reason, stopPrice);
+                Print("Position {0}: {1} accepted at {2}; current Pips={3:F2}, NetProfit={4:F2}, volume={5}.",
+                    position.Id, reason, stopPrice, position.Pips, position.NetProfit, position.VolumeInUnits);
             }
             else
             {
-                Print("WARNING position {0}: ModifyPosition failed ({1}). Candidate stop={2}. Verify broker minimum distance, market state, and account permissions.",
-                    position.Id, result.Error, stopPrice);
+                Print("WARNING position {0}: ModifyPosition failed ({1}). Candidate stop={2}; current stop={3}; Bid={4}; Ask={5}; required market gap={6}. Verify broker distance/freeze rules and execution conditions.",
+                    position.Id, result.Error, stopPrice,
+                    position.StopLoss.HasValue ? position.StopLoss.Value.ToString() : "none",
+                    Symbol.Bid, Symbol.Ask, GetRequiredMarketGap(position.TradeType));
             }
         }
 
