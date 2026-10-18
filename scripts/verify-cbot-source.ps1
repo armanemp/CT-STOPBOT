@@ -12,7 +12,13 @@ $checks = @(
     @{ Name = "initial R used for position target"; Pattern = 'Always anchor the TP budget to the original R' },
     @{ Name = "low-RR targets explicitly marked"; Pattern = 'context \+= "/RRLOW";' },
     @{ Name = "pre-entry qualification uses retained displayed prices"; Pattern = 'PredictDisplayedMarketGuidePrice\(' },
-    @{ Name = "risk/reward is calculated from cost-adjusted price distances"; Pattern = 'TryCalculateNetRewardRisk' }
+    @{ Name = "risk/reward is calculated from cost-adjusted price distances"; Pattern = 'TryCalculateNetRewardRisk' },
+    @{ Name = "pre-entry commission reserve is explicit"; Pattern = 'PreEntryCommissionReservePips' },
+    @{ Name = "live positions use separate cost reserve"; Pattern = 'GetBaseExecutionCostReservePrice' },
+    @{ Name = "position TP marks unknown original risk"; Pattern = 'context \+= "/R_UNKNOWN";' },
+    @{ Name = "position TP marks unknown costs"; Pattern = 'context \+= "/COST_UNKNOWN";' },
+    @{ Name = "near structure warning is explicit"; Pattern = 'context \+= "/TIGHT";' },
+    @{ Name = "labels use wider ATR gap"; Pattern = 'atrPrice \* 0\.25' }
 )
 
 foreach ($check in $checks) {
