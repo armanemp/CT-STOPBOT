@@ -68,19 +68,24 @@ Do not skip these tests before live use. Record the broker, account type, symbol
 
 ## Pre-entry guidance and position handover
 
-- [ ] Start the cBot with no positions and sufficient M5 history; confirm the BUY and SELL SL/TP proposal lines and condition panel appear.
-- [ ] Confirm the panel reports EMA 9/21/50 trend, three-bar momentum, RSI, ATR regime, spread/ATR quality and an alignment index marked as heuristic rather than probability.
-- [ ] Confirm pre-entry SL prefers the latest confirmed pivot with the configured right/left bar strength, and visibly labels range fallback when no valid pivot can be used.
+- [ ] Start with no positions and sufficient M5 history; confirm BUY and SELL each draw separate ENTRY, SL and TP horizontal guide lines.
+- [ ] Confirm no verbose static market panel remains, and each line label contains only its short name plus distance in pips.
+- [ ] Measure the label location: it should remain 40 M5 candles to the right of the latest bar and move forward as new bars form.
+- [ ] Confirm labels use a larger, thin/light font and the dark coordinated palette; line labels should not display extra context, prices, or explanations.
+- [ ] Confirm a high-confidence setup gets a thicker gold ENTRY line with a star, while ordinary entry suggestions are subdued and dotted.
+- [ ] Confirm ENTRY is a conditional breakout level at a confirmed swing high/low with an ATR/spread buffer, not simply the current Ask/Bid.
+- [ ] Confirm pre-entry SL prefers the latest confirmed pivot with the configured strength, with a range-extreme fallback when no safe confirmed pivot can be used.
 - [ ] Compare the displayed pre-entry SL with the bot-installed initial SL in a manual Buy and Sell; aside from quote changes or the emergency safety fallback, the structural anchor and buffer should match.
-- [ ] Verify scenarios are marked WAIT when the stop is invalid, wider than the configured maximum ATR distance (default 2.5 ATR), R:R is below the configured minimum (default 1.5), spread/ATR is too high, or trend and momentum both oppose the side.
+- [ ] Confirm a strong visual highlight requires directional alignment, matching trend/momentum, a safe SL, acceptable spread, no extended momentum, stop distance within the default 2.5 ATR maximum, and R:R at or above the default 1.5 minimum.
+- [ ] Test a nearby confirmed pivot target, no-pivot fallback, and the case where a pivot is too close to current price to be a valid target barrier.
 - [ ] Test a nearby confirmed pivot target, no-pivot fallback, and the case where a pivot is too close to current price to be a valid target barrier.
 - [ ] Verify the lines are chart-only; no position/order is created and no active stop is implied by a proposed line.
 - [ ] During small quote/spread fluctuations, verify proposal lines stay stable; after a meaningful price/structure change, verify they update within the configured threshold/cooldown rules.
 - [ ] Observe the TP proposal being reached; confirm the next forward TP objective is calculated without creating/changing an actual TP order.
-- [ ] Open a manual BUY without an SL; confirm the matching pre-trade SL proposal remains while the position lacks protection and the panel warns if protection is not installed.
+- [ ] Open a manual BUY without an SL; confirm the pre-entry ENTRY/TP suggestions for that side disappear, the generic SL line remains as a concise red `SL!` warning until protection exists, and per-position TP lines continue.
 - [ ] After the actual SL appears on the position, confirm the generic BUY SL proposal disappears; confirm the live position-specific TP line remains and continues updating.
 - [ ] Repeat for SELL and both directions simultaneously.
-- [ ] If the broker rejects the initial SL, confirm the cBot does not hide the SL proposal as if protection had succeeded and that the warning is visible.
+- [ ] If the broker rejects the initial SL, confirm the generic SL warning line remains until protection can be observed; labels must remain short and contain only the warning name plus pips.
 - [ ] Open multiple positions on one side; confirm the generic SL proposal is hidden only when all same-side matching positions show SL/native trailing/native BE protection, and each open position retains its own TP line.
 - [ ] Close all positions in one direction; confirm the pre-entry scenario for that side becomes available again.
 - [ ] Disable pre-trade guidance and confirm its lines/panel are removed; verify independent per-position TP behavior follows the TP display toggle.
