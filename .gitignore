@@ -1,0 +1,15 @@
+# .NET / IDE
+bin/
+obj/
+.vs/
+.idea/
+*.user
+*.suo
+
+# cTrader local artifacts
+*.algo
+*.cbotset
+
+# OS
+.DS_Store
+Thumbs.db
