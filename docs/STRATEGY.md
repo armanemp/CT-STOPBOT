@@ -67,7 +67,7 @@ One stop modification is attempted per position at a time. Failed changes are lo
 
 - Separate parameter switches allow initial stop placement, break-even, and structure trailing to be tested independently. Disabling initial stop placement can leave a position with no stop; it is a test control, not a safe live default.
 - Position management is wrapped in exception handling so one unexpected per-position exception is logged instead of terminating the entire per-tick loop.
-- Position modifications preserve take-profit, the server-side trailing flag, and the existing stop trigger method.
+- Position modifications preserve take-profit, the server-side trailing flag, stop trigger method, and any existing server-side break-even settings. Structural stops round outward; break-even targets round toward the intended profit offset (Buy up, Sell down), then are revalidated against current/broker distance.
 - The final selected trailing candidate must still meet the trailing-step threshold; a break-even candidate does not accidentally waive that threshold if structural trailing supersedes it.
 - Minimum round-trip commission reserve can account for broker minimum commissions when the observed opening commission is zero or unusually small.
 
