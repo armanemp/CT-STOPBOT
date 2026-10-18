@@ -15,6 +15,9 @@ internal static class Program
             OutwardRoundedTargetsAreRecappedBeforeStructure();
             NearStructureIsNeverSilentlyIgnored();
             StructureBeyondProjectedTargetDoesNotCap();
+            SpreadFloorAndSpikeDetectionAreSafe();
+            AdaptiveTrailingScalesAndTightens();
+            InitialStopAtrBoundsAreDirectional();
             InvalidInputsAreRejected();
 
             Console.WriteLine("PASS: {0} risk-reward assertions.", _assertions);
@@ -109,6 +112,74 @@ internal static class Program
             100.0, 110.0, 115.0, 1.0, 0.5, 1, out target),
             "structure beyond target should not cap it");
         Near(110.0, target, 1e-10, "projected target remains unchanged without an intervening barrier");
+    }
+
+    private static void SpreadFloorAndSpikeDetectionAreSafe()
+    {
+        Near(0.22, SmartProtectionEngine.GetEffectiveSpread(0.05, 0.01, 0.22),
+            1e-10, "effective spread must respect the configured XAU price floor");
+        Assert(SmartProtectionEngine.IsSpreadSpike(0.60, 0.20, 0.22, 2.5),
+            "spread above 2.5 times the protected baseline must be detected");
+        Assert(!SmartProtectionEngine.IsSpreadSpike(0.54, 0.20, 0.22, 2.5),
+            "spread below the spike threshold must not be blocked");
+        Assert(!SmartProtectionEngine.IsSpreadSpike(0.60, 0.20, 0.22, 0.0),
+            "zero spike multiplier disables the guard");
+        Assert(!SmartProtectionEngine.IsSpreadSpike(double.NaN, 0.20, 0.22, 2.5),
+            "invalid live spread must not be classified as a valid spike");
+    }
+
+    private static void AdaptiveTrailingScalesAndTightens()
+    {
+        Near(1.5, SmartProtectionEngine.GetVolatilityScale(0.16, 0.10, 0.85, 1.5),
+            1e-10, "fast/slow ATR ratio must be capped at maximum scale");
+        Near(0.85, SmartProtectionEngine.GetVolatilityScale(0.03, 0.10, 0.85, 1.6),
+            1e-10, "fast/slow ATR ratio must respect minimum scale");
+        Near(1.0, SmartProtectionEngine.GetVolatilityScale(0.0, 0.10, 0.85, 1.6),
+            1e-10, "unavailable ATR must use neutral scale");
+
+        Near(0.32, SmartProtectionEngine.GetAdaptiveTrailingAtrMultiplier(
+            0.20, 0.16, 0.10, 0.85, 1.6, 20.0, 10.0, 3.0, 0.75, true),
+            1e-10, "trailing buffer must expand with high volatility before tighten-R");
+        Near(0.24, SmartProtectionEngine.GetAdaptiveTrailingAtrMultiplier(
+            0.20, 0.16, 0.10, 0.85, 1.6, 40.0, 10.0, 3.0, 0.75, true),
+            1e-10, "trailing buffer must tighten after the configured R threshold");
+        Near(0.20, SmartProtectionEngine.GetAdaptiveTrailingAtrMultiplier(
+            0.20, 0.16, 0.10, 0.85, 1.6, 40.0, 10.0, 3.0, 0.75, false),
+            1e-10, "disabling smart enhancements must preserve the base trailing multiplier");
+    }
+
+    private static void InitialStopAtrBoundsAreDirectional()
+    {
+        double stop;
+        string adjustment;
+        Assert(SmartProtectionEngine.TryApplyInitialStopAtrBounds(
+            100.0, 99.95, 0.10, 0.75, 6.0, true, out stop, out adjustment),
+            "Buy SL should accept valid reference/stop values");
+        Near(99.925, stop, 1e-10, "Buy SL should widen to minimum ATR distance");
+        Assert(adjustment == "ATR_FLOOR", "Buy floor should be reported");
+
+        Assert(SmartProtectionEngine.TryApplyInitialStopAtrBounds(
+            100.0, 98.90, 0.10, 0.75, 6.0, true, out stop, out adjustment),
+            "distant Buy SL should be eligible for max ATR cap");
+        Near(99.40, stop, 1e-10, "Buy SL distance should be capped at six ATR");
+        Assert(adjustment == "ATR_CAP", "Buy cap should be reported");
+
+        Assert(SmartProtectionEngine.TryApplyInitialStopAtrBounds(
+            100.0, 100.05, 0.10, 0.75, 6.0, false, out stop, out adjustment),
+            "Sell SL should accept valid reference/stop values");
+        Near(100.075, stop, 1e-10, "Sell SL should widen to minimum ATR distance");
+
+        Assert(SmartProtectionEngine.TryApplyInitialStopAtrBounds(
+            100.0, 101.10, 0.10, 0.75, 6.0, false, out stop, out adjustment),
+            "distant Sell SL should be eligible for max ATR cap");
+        Near(100.60, stop, 1e-10, "Sell SL distance should be capped at six ATR");
+
+        Assert(!SmartProtectionEngine.TryApplyInitialStopAtrBounds(
+            100.0, 100.05, 0.10, 0.75, 6.0, true, out stop, out adjustment),
+            "Buy stop on the wrong side must be rejected");
+        Assert(!SmartProtectionEngine.TryApplyInitialStopAtrBounds(
+            100.0, 99.95, 0.10, 0.75, 6.0, false, out stop, out adjustment),
+            "Sell stop on the wrong side must be rejected");
     }
 
     private static void InvalidInputsAreRejected()
