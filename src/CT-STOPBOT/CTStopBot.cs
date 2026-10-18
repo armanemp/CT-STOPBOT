@@ -136,8 +136,10 @@ namespace CTStopBot
         private readonly Dictionary<int, double> _suggestedTpPrices = new Dictionary<int, double>();
         private readonly Dictionary<int, DateTime> _suggestedTpUpdatedAt = new Dictionary<int, DateTime>();
         private readonly Dictionary<int, string> _suggestedTpContexts = new Dictionary<int, string>();
+        private readonly Dictionary<int, DateTime> _suggestedTpStartTimes = new Dictionary<int, DateTime>();
         private readonly Dictionary<string, double> _marketGuidePrices = new Dictionary<string, double>();
         private readonly Dictionary<string, DateTime> _marketGuideUpdatedAt = new Dictionary<string, DateTime>();
+        private readonly Dictionary<string, DateTime> _marketGuideStartTimes = new Dictionary<string, DateTime>();
         private readonly Dictionary<string, string> _marketGuideContexts = new Dictionary<string, string>();
         private const int GuideLabelOffsetBars = 40;
 
@@ -211,6 +213,7 @@ namespace CTStopBot
         protected override void OnTimer()
         {
             ManageAllPositions();
+            UpdatePreTradeGuidance();
         }
 
         protected override void OnStop()
@@ -441,8 +444,12 @@ namespace CTStopBot
                     if (movement < minimumMove)
                     {
                         string previousContext;
-                        if (!_suggestedTpContexts.TryGetValue(position.Id, out previousContext) ||
-                            !string.Equals(previousContext, context, StringComparison.Ordinal))
+                        var contextChanged = !_suggestedTpContexts.TryGetValue(position.Id, out previousContext) ||
+                            !string.Equals(previousContext, context, StringComparison.Ordinal);
+                        DateTime lastAnchor;
+                        var newBar = !_suggestedTpStartTimes.TryGetValue(position.Id, out lastAnchor) ||
+                            lastAnchor != Bars.OpenTimes[Bars.Count - 1];
+                        if (contextChanged || newBar)
                         {
                             DrawSuggestedTpObjects(position, previousPrice, context);
                             _suggestedTpContexts[position.Id] = context;
@@ -621,6 +628,7 @@ namespace CTStopBot
             label.IsBold = false;
             label.HorizontalAlignment = HorizontalAlignment.Left;
             label.VerticalAlignment = VerticalAlignment.Center;
+            _suggestedTpStartTimes[position.Id] = Bars.OpenTimes[Bars.Count - 1];
         }
 
         private bool IsSuggestedTargetReached(double targetPrice, TradeType tradeType)
@@ -647,6 +655,7 @@ namespace CTStopBot
             _suggestedTpPrices.Remove(positionId);
             _suggestedTpUpdatedAt.Remove(positionId);
             _suggestedTpContexts.Remove(positionId);
+            _suggestedTpStartTimes.Remove(positionId);
         }
 
         private double ClampValue(double value, double minimum, double maximum)
@@ -1197,11 +1206,13 @@ namespace CTStopBot
                 !string.Equals(previousStyle, styleKey, StringComparison.Ordinal);
 
             var startTime = Bars.OpenTimes[Bars.Count - 1];
+            DateTime lastStartTime;
+            var newBar = !_marketGuideStartTimes.TryGetValue(key, out lastStartTime) || lastStartTime != startTime;
             var endTime = startTime.AddMinutes(GuideLabelOffsetBars * 5.0);
             var lineName = GetMarketGuideLineName(key);
             var textName = GetMarketGuideTextName(key);
 
-            if (!hasPrevious || priceChanged || styleChanged || levelReached)
+            if (!hasPrevious || priceChanged || styleChanged || levelReached || newBar)
             {
                 var thickness = highConfidence ? 3 : 2;
                 var style = isEntry && !highConfidence ? LineStyle.Dots : LineStyle.Solid;
@@ -1210,6 +1221,7 @@ namespace CTStopBot
                 line.ExtendToInfinity = false;
                 _marketGuidePrices[key] = displayPrice;
                 _marketGuideUpdatedAt[key] = Server.Time;
+                _marketGuideStartTimes[key] = startTime;
             }
 
             var distancePips = Symbol.PipSize > 0
@@ -1244,6 +1256,7 @@ namespace CTStopBot
             _marketGuidePrices.Remove(key);
             _marketGuideUpdatedAt.Remove(key);
             _marketGuideContexts.Remove(key);
+            _marketGuideStartTimes.Remove(key);
         }
 
         private void RemoveAllPreTradeGuideObjects()
