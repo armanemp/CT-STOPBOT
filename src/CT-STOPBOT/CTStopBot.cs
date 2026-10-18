@@ -689,7 +689,10 @@ namespace CTStopBot
             if (!foundLevel)
                 nearestLevel = position.TradeType == TradeType.Buy ? double.MaxValue : double.MinValue;
 
-            for (var i = firstIndex; !usedConfirmedPivot && i <= lastClosedIndex; i++)
+            // A confirmed pivot is a useful candidate, but it must not hide a nearer
+            // closed-bar extreme. Always scan the entire closed lookback and keep the
+            // nearest barrier from either source.
+            for (var i = firstIndex; i <= lastClosedIndex; i++)
             {
                 if (position.TradeType == TradeType.Buy)
                 {
@@ -698,6 +701,7 @@ namespace CTStopBot
                     {
                         nearestLevel = high;
                         foundLevel = true;
+                        usedConfirmedPivot = false;
                     }
                 }
                 else
@@ -707,6 +711,7 @@ namespace CTStopBot
                     {
                         nearestLevel = low;
                         foundLevel = true;
+                        usedConfirmedPivot = false;
                     }
                 }
             }
@@ -1409,7 +1414,9 @@ namespace CTStopBot
                 nearestLevel = tradeType == TradeType.Buy ? double.MaxValue : double.MinValue;
 
             var firstStructureIndex = lastClosedIndex - TpStructureLookback + 1;
-            for (var i = firstStructureIndex; !usedConfirmedPivot && i <= lastClosedIndex; i++)
+            // A later confirmed pivot does not excuse crossing a nearer historical
+            // high/low. Scan all closed bars and keep whichever barrier is nearest.
+            for (var i = firstStructureIndex; i <= lastClosedIndex; i++)
             {
                 if (tradeType == TradeType.Buy)
                 {
@@ -1418,6 +1425,7 @@ namespace CTStopBot
                     {
                         nearestLevel = high;
                         foundLevel = true;
+                        usedConfirmedPivot = false;
                     }
                 }
                 else
@@ -1427,6 +1435,7 @@ namespace CTStopBot
                     {
                         nearestLevel = low;
                         foundLevel = true;
+                        usedConfirmedPivot = false;
                     }
                 }
             }
