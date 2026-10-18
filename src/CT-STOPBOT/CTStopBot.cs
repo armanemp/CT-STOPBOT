@@ -1235,6 +1235,33 @@ namespace CTStopBot
             return IsFiniteNumber(value) && value > 0.0;
         }
 
+        private bool TryFindLatestConfirmedPivot(bool seekLow, int lastClosedIndex, int lookback, double boundary, bool below, out double level)
+        {
+            level = 0.0;
+            var strength = Math.Max(1, ConfirmedPivotStrength);
+            var first = Math.Max(strength, lastClosedIndex - lookback + 1);
+            var last = lastClosedIndex - strength;
+            for (var i = last; i >= first; i--)
+            {
+                var price = seekLow ? Bars.LowPrices[i] : Bars.HighPrices[i];
+                var pivot = true;
+                for (var n = 1; n <= strength; n++)
+                {
+                    if (seekLow ? price >= Bars.LowPrices[i - n] || price >= Bars.LowPrices[i + n]
+                                : price <= Bars.HighPrices[i - n] || price <= Bars.HighPrices[i + n])
+                    {
+                        pivot = false;
+                        break;
+                    }
+                }
+                if (!pivot || (below ? price >= boundary : price <= boundary))
+                    continue;
+                level = price;
+                return true;
+            }
+            return false;
+        }
+
         private bool TryCalculateStructuralStop(Position position, double atrMultiplier, bool allowFallback, out double stopPrice)
         {
             stopPrice = 0.0;
