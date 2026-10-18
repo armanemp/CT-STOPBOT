@@ -131,6 +131,7 @@ namespace CTStopBot
         private readonly Dictionary<string, DateTime> _marketGuideUpdatedAt = new Dictionary<string, DateTime>();
         private readonly Dictionary<string, string> _marketGuideContexts = new Dictionary<string, string>();
         private string _lastMarketStatusText = string.Empty;
+        private DateTime _lastMarketStatusAt = DateTime.MinValue;
 
         protected override void OnStart()
         {
@@ -884,13 +885,11 @@ namespace CTStopBot
                     RemoveMarketGuideObject(sideKey + "_TP");
                 }
 
-                sideStatus = string.Format("{0}; entry {1}; SL {2}; TP {3}; R:R {4:F2}; {5}",
+                sideStatus = string.Format("{0} | R:R {1:F1} | SL {2} | {3}",
                     GetSetupQuality(tradeType, signalScore, spreadToAtr, overextended),
-                    entryPrice.ToString("F" + Symbol.Digits),
-                    stopIsSafe ? stopPrice.ToString("F" + Symbol.Digits) : "UNSAFE / WAIT",
-                    ShowSuggestedTpLine ? targetPrice.ToString("F" + Symbol.Digits) : "hidden",
                     rewardRisk,
-                    stopIsSafe ? "SL level passes current quote-gap check" : "structure/quote invalidated");
+                    stopIsSafe ? "candidate valid" : "UNSAFE / WAIT",
+                    ShowSuggestedTpLine ? "levels are visual only" : "TP display disabled");
                 return;
             }
 
@@ -902,8 +901,9 @@ namespace CTStopBot
             if (unprotectedPositions == 0)
             {
                 RemoveMarketGuideObject(sideKey + "_SL");
-                sideStatus = string.Format("{0} position(s); protection present; generic SL hidden; per-position TP continues",
-                    totalPositions);
+                sideStatus = string.Format("{0} position(s); protection present; generic SL hidden; {1}",
+                    totalPositions,
+                    ShowSuggestedTpLine ? "per-position TP continues" : "TP display disabled");
             }
             else
             {
@@ -1132,12 +1132,20 @@ namespace CTStopBot
             if (string.Equals(_lastMarketStatusText, status, StringComparison.Ordinal))
                 return;
 
+            // Throttle static-text redraws during rapid quote/spread changes. State and
+            // price lines remain calculated per tick; this panel refreshes at most once
+            // per second to avoid excessive chart-object churn.
+            if (_lastMarketStatusAt != DateTime.MinValue &&
+                (Server.Time - _lastMarketStatusAt).TotalSeconds < 1.0)
+                return;
+
             try
             {
                 var panel = Chart.DrawStaticText("CTSTOPBOT_MARKET_STATUS", status,
                     VerticalAlignment.Top, HorizontalAlignment.Left, Color.White);
                 panel.FontSize = 10;
                 _lastMarketStatusText = status;
+                _lastMarketStatusAt = Server.Time;
             }
             catch (Exception ex)
             {
@@ -1172,6 +1180,7 @@ namespace CTStopBot
             RemoveMarketGuideObject("SELL_TP");
             Chart.RemoveObject("CTSTOPBOT_MARKET_STATUS");
             _lastMarketStatusText = string.Empty;
+            _lastMarketStatusAt = DateTime.MinValue;
         }
 
         private bool IsFiniteNumber(double value)
