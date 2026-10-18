@@ -47,6 +47,25 @@ Do not skip these tests before live use. Record the broker, account type, symbol
 - [ ] Confirm trailing respects the configured minimum improvement step even when a break-even candidate is also eligible.
 - [ ] Confirm the bot does not modify other symbols or excluded labels.
 
+## Multiple-position independence
+
+- [ ] Open two or more manual demo positions on the same symbol, including both Buy and Sell and different volumes; verify each position ID receives its own stop-management decisions and retry state.
+- [ ] Give the positions different pre-existing stops; verify the bot never copies a candidate or retry state from one position to another.
+- [ ] Confirm a close removes only the closed position's TP line and per-position state.
+- [ ] If other cBots share the symbol, confirm the default all-label scope is intentional or verify label restriction against the actual platform labels.
+
+## Suggested TP visualization (display-only)
+
+- [ ] Open several positions and confirm a separate TP suggestion label/line is drawn for every eligible position ID.
+- [ ] Verify the line is green for Buy, red for Sell, short/dotted, and visible on the chart.
+- [ ] Record the actual `Position.TakeProfit` before and after cBot operation; confirm this feature never submits or changes it.
+- [ ] Watch small tick fluctuations and confirm the line does not move unless the ATR/pip threshold is met.
+- [ ] Confirm trend/momentum context changes can update the label without forcing a price jump.
+- [ ] Let price reach/pass the suggested target; confirm the next forward suggestion is recalculated promptly.
+- [ ] Confirm the nearest valid historical resistance/support can cap the ATR target, and inspect both trend-aligned and countertrend cases.
+- [ ] Disable the suggested TP line; confirm the drawings are removed and no TP order is changed.
+- [ ] Close a position and stop the cBot; confirm the corresponding drawings are removed.
+
 ## Resilience
 
 - [ ] Check log output on broker rejection and ensure it never claims a failed stop was set.
