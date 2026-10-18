@@ -879,8 +879,7 @@ namespace CTStopBot
                         "pre-entry | {0} | risk {1:F2} ATR | {2} | align {3}/100 | {4}/{5} | spread/ATR {6:P1}",
                         stopUsesPivot ? "confirmed pivot" : "range fallback",
                         stopDistanceAtr,
-                        GetSetupQuality(tradeType, signalScore, spreadToAtr, overextended,
-                            rewardRisk, stopDistanceAtr, stopIsSafe, trendText, momentumText),
+                        GetSetupQuality(tradeType, signalScore, spreadToAtr, overextended),
                         (int)Math.Round(50.0 + 50.0 * (tradeType == TradeType.Buy ? signalScore : -signalScore)),
                         trendText, momentumText, spreadToAtr);
                     DrawOrUpdateMarketGuide(sideKey + "_SL", tradeType, stopPrice, atrPrice,
