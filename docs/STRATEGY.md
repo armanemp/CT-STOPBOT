@@ -15,24 +15,25 @@ By default it manages all position labels on that symbol, including manual posit
    - current spread × spread-buffer multiplier,
    - the minimum wick buffer in pips.
 4. Round away from the market using the symbol tick size.
-5. If the structural level is too close to or already through the current close-side quote, log a warning and calculate a fallback beyond the current quote. This may signal a broken swing; inspect the position immediately. If the broker rejects the update, log the error and retry after a cooldown.
+5. Enforce the larger of the configured market gap and the broker-reported minimum stop-loss distance. cTrader may express the broker distance in pips or as a percentage of price.
+6. If the structural level is too close to or already through the current close-side quote, log a warning and calculate a fallback beyond the current quote. This may signal a broken swing; inspect the position immediately. If the broker rejects the update, log the error and retry after a cooldown.
 
-An existing stop is preserved; the cBot does not widen it. If the structural candidate is already too close to or through the current quote, the bot logs a warning and calculates a fallback beyond the current quote. This can indicate that the structural level has already been invalidated; inspect the position promptly and verify any fallback/rejection in the logs. This is a simple structural baseline and needs demo observation to tune to the broker's Gold feed.
+An existing stop is preserved; the cBot does not widen it. The broker-reported minimum distance reduces avoidable rejections, but it may not capture every dynamic freeze rule or execution constraint, so broker rejections still need to be tested.
 
 ## Cost-aware break-even estimate
 
 The cBot estimates a stop price beyond entry using:
 
 - current spread converted to pips × Break-even spread multiplier,
-- absolute observed Position.Commissions × Round-trip commission multiplier,
-- commission converted into pips using an estimated pip value for the position volume,
+- absolute one-way Position.Commissions × Round-trip commission multiplier,
+- commission and already-accrued **negative swap** converted into pips using the estimated pip value for the position volume,
 - Slippage reserve (pips),
 - Additional cost reserve (account currency),
 - Minimum net lock (pips).
 
 Break-even only becomes eligible after Position.Pips reaches this estimated offset plus Break-even activation extra. The candidate is accepted only when it improves the existing stop and is far enough from the current quote.
 
-This is intentionally conservative and approximate. Commission schedules may have minimums, commissions may be charged in different assets, spreads change, a stop can slip, and overnight swap or conversion fees may accrue. Use the extra reserve to account for broker-specific costs, then validate actual net P/L on demo history. Do not interpret “break-even” as a guarantee of non-negative realised P/L.
+This is intentionally conservative and approximate. cTrader documents Position.Commissions as the one-way commission on the opening request, so the multiplier estimates the round trip. Position.Swap contributes already-accrued negative swap; future swap is not predictable and is not reserved. Commission schedules may have minimums, spreads change, a stop can slip, and conversion fees may accrue. Symbol.PipValue is fixed when the cBot starts and is not updated in real time; conversion into a different account currency may drift. Use the extra reserve to account for broker-specific costs, then validate actual net P/L on demo history. Do not interpret “break-even” as a guarantee of non-negative realised P/L.
 
 ## Trailing
 
