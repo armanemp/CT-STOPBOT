@@ -25,7 +25,8 @@ Do not skip these tests before live use. Record the broker, account type, symbol
 - [ ] Confirm stop placement respects the broker-reported minimum stop-loss distance when distance units are pips.
 - [ ] If the broker reports percentage-based minimum distance, confirm the diagnostic log displays the units and candidate stops respect the percentage-derived gap.
 - [ ] Confirm dynamic freeze rules can still reject an update and that the rejection is logged rather than treated as successful protection.
-- [ ] Force/observe a case where the candle-based level is too close to or through the current quote; confirm the fallback warning is visible and a broker rejection is never reported as success.
+- [ ] Force/observe a case where the initial candle-based level is too close to or through the current quote; confirm the fallback warning is visible and a broker rejection is never reported as success.
+- [ ] Force/observe an already-protected position whose trailing structure is invalidated; confirm that the trailing update is skipped instead of snapping the stop to the current market.
 
 ## Break-even and trailing
 
@@ -43,6 +44,7 @@ Do not skip these tests before live use. Record the broker, account type, symbol
 ## Resilience
 
 - [ ] Check log output on broker rejection and ensure it never claims a failed stop was set.
+- [ ] Confirm repeated rejections use exponential backoff up to the configured maximum retry interval.
 - [ ] Observe one forced/induced management exception if feasible; confirm the bot logs it and continues servicing other positions.
 - [ ] Check that setting `Manage positions with server-side trailing` off prevents conflicts with native trailing positions.
 - [ ] Restart the cBot with a protected position; confirm it keeps and only tightens the existing stop.
