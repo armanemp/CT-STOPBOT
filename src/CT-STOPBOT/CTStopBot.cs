@@ -605,7 +605,8 @@ namespace CTStopBot
             var atrMultiplier = ClampValue(TpBaseAtrMultiplier + directionalScore * TpTrendExtensionAtr, 0.6, 4.0);
             var minimumTargetDistance = Math.Max(Symbol.TickSize * 3.0,
                 Math.Max(Symbol.Spread * 1.5, atrPrice * 0.35));
-            var projectedDistance = Math.Max(atrPrice * atrMultiplier, minimumTargetDistance);
+            var atrTargetDistance = Math.Max(atrPrice * atrMultiplier, minimumTargetDistance);
+            var projectedDistance = atrTargetDistance;
 
             // Always anchor the TP budget to the original R when it is available, even
             // after BE/trailing has moved the active stop. Never redefine R from a tighter SL.
@@ -631,7 +632,11 @@ namespace CTStopBot
             // or passed. Do not move the target away merely because price is approaching it.
             if (direction * (target - referencePrice) <= 0.0)
             {
-                target = referencePrice + direction * projectedDistance;
+                // For subsequent objectives, use the ATR projection from live price,
+                // not the first-target 1.8R budget again. The first target was already
+                // reached; repeating the full R budget here would push later targets
+                // unnecessarily far away from the market.
+                target = referencePrice + direction * atrTargetDistance;
                 extendedAfterTarget = true;
             }
 
