@@ -19,7 +19,7 @@ Initial target: XAUUSD / Gold on the 5-minute chart. The first iteration focuses
 
 The repository can live anywhere; it does not need to be inside cTrader's folders. The project file is `src/CT-STOPBOT/CT-STOPBOT.csproj`.
 
-1. Install Git for Windows and the .NET 8 SDK.
+1. Install Git for Windows and the .NET 6 SDK (the current project targets net6.0).
 2. Clone the development branch into your own workspace.
 3. Run the following from the repository root in PowerShell:
 
