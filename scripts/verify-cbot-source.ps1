@@ -26,6 +26,8 @@ $checks = @(
     @{ Name = "TP label remains concise"; Pattern = '"{0} \| \{1:F1\} pips"' },
     @{ Name = "TP quality lives in status summary"; Pattern = 'GetOpenPositionTpQualitySummary\(' },
     @{ Name = "next TP extends only after current target is reached"; Pattern = 'Do not move the target away merely because price is approaching it\.' }
+    @{ Name = "TP structure refresh overrides smoothing"; Pattern = 'newBar && structureIsCurrentlyCappingTarget' },
+    @{ Name = "TP structure refresh overrides cooldown"; Pattern = 'if \(cooldownActive && !mustAdoptCandidate\)' }
 )
 
 foreach ($check in $checks) {
@@ -42,6 +44,9 @@ if ($source -match 'Chart\.DrawText\(textName,\s*labelText,\s*endBarIndex') {
 }
 if ($source -match 'target - referencePrice\)\s*<=\s*minimumTargetDistance') {
     throw "Invariant failed: the next TP is advanced while price is still approaching the current target."
+}
+if ($source -notmatch 'contextChanged \|\|\s*\(newBar && structureIsCurrentlyCappingTarget\)') {
+    throw "Invariant failed: context/structure changes do not force a TP refresh."
 }
 if ($source -match 'ScrollXBy') {
     throw "Invariant failed: chart viewport auto-scrolling was reintroduced."
