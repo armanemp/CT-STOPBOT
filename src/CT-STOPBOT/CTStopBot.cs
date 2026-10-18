@@ -1262,6 +1262,49 @@ namespace CTStopBot
             return false;
         }
 
+        private bool TryFindNearestTargetPivot(TradeType tradeType, int lastClosedIndex, int lookback, double reference, double minDistance, out double level)
+        {
+            level = 0.0;
+            var strength = Math.Max(1, ConfirmedPivotStrength);
+            var first = Math.Max(strength, lastClosedIndex - lookback + 1);
+            var last = lastClosedIndex - strength;
+            var findHigh = tradeType == TradeType.Buy;
+            var found = false;
+            var nearest = findHigh ? double.MaxValue : double.MinValue;
+            for (var i = first; i <= last; i++)
+            {
+                var price = findHigh ? Bars.HighPrices[i] : Bars.LowPrices[i];
+                var pivot = true;
+                for (var n = 1; n <= strength; n++)
+                {
+                    if (findHigh ? price <= Bars.HighPrices[i - n] || price <= Bars.HighPrices[i + n]
+                                 : price >= Bars.LowPrices[i - n] || price >= Bars.LowPrices[i + n])
+                    {
+                        pivot = false;
+                        break;
+                    }
+                }
+                if (!pivot)
+                    continue;
+                if (findHigh)
+                {
+                    if (price > reference + minDistance && price < nearest)
+                    {
+                        nearest = price;
+                        found = true;
+                    }
+                }
+                else if (price < reference - minDistance && price > nearest)
+                {
+                    nearest = price;
+                    found = true;
+                }
+            }
+            if (found)
+                level = nearest;
+            return found;
+        }
+
         private bool TryCalculateStructuralStop(Position position, double atrMultiplier, bool allowFallback, out double stopPrice)
         {
             stopPrice = 0.0;
