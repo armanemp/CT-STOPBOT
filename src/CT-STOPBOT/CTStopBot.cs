@@ -562,7 +562,23 @@ namespace CTStopBot
                         DateTime lastAnchor;
                         var newBar = !_suggestedTpStartTimes.TryGetValue(position.Id, out lastAnchor) ||
                             lastAnchor != Bars.OpenTimes[Bars.Count - 1];
-                        if (contextChanged || newBar)
+                        var structureIsCurrentlyCappingTarget =
+                            context.IndexOf("/STRUCTURE", StringComparison.Ordinal) >= 0;
+
+                        // Smoothing is subordinate to structural safety. If the regime/warning
+                        // changes, immediately adopt the recalculated candidate. If a target is
+                        // structure-capped, refresh it on each new closed-candle interval so an
+                        // old line cannot remain beyond a newly formed/closer barrier.
+                        var mustAdoptCandidate = contextChanged ||
+                            (newBar && structureIsCurrentlyCappingTarget);
+                        if (mustAdoptCandidate)
+                        {
+                            DrawSuggestedTpObjects(position, candidate, context);
+                            _suggestedTpPrices[position.Id] = candidate;
+                            _suggestedTpUpdatedAt[position.Id] = Server.Time;
+                            _suggestedTpContexts[position.Id] = context;
+                        }
+                        else if (newBar)
                         {
                             DrawSuggestedTpObjects(position, previousPrice, context);
                             _suggestedTpContexts[position.Id] = context;
