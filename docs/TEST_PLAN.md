@@ -37,6 +37,7 @@ Do not skip these tests before live use. Record the broker, account type, symbol
 - [ ] Confirm no break-even move occurs before its configured estimated-cost threshold.
 - [ ] Confirm the stop moves only when the candidate is more protective.
 - [ ] Confirm commission multiplier, minimum round-trip commission reserve, spread, slippage and additional cost reserve change the estimated break-even offset as expected.
+- [ ] Set the pre-entry commission reserve in pips for the broker's estimated round-trip commission; confirm it affects pre-entry R:R only, not the live-position cash-cost estimate.
 - [ ] Confirm already-accrued negative swap increases the required break-even offset; positive swap does not reduce the conservative cost estimate.
 - [ ] Confirm stop modification preserves existing take-profit, stop trigger method and server-side trailing setting.
 - [ ] Confirm positions with a native server-side break-even rule are excluded from management by this package version.
@@ -69,16 +70,16 @@ Do not skip these tests before live use. Record the broker, account type, symbol
 ## Pre-entry guidance and position handover
 
 - [ ] Start with no positions and sufficient M5 history; confirm only side(s) meeting every strict quality criterion draw ENTRY, SL and TP guide lines. Unqualified sides must not leave muted, low-quality pseudo-signals.
-- [ ] On a qualified setup, confirm ENTRY, SL and TP lines match their respective price levels and have thickness 1.
+- [ ] On qualified and unqualified setups, confirm ENTRY/SL/TP match their own line price and use thickness 1. Unqualified calculations should remain visible as dotted/provisional guides instead of disappearing.
 - [ ] Confirm no verbose static market panel remains, and each line label contains only its short name plus distance in pips; no entry, TP or SL price number and no per-position ID appears.
 - [ ] Confirm the chart viewport does not jump on cBot start or reload, and lines span from 20 actual bar indices before the active candle to 20 after it.
-- [ ] As each new M5 candle forms, confirm the guide endpoints and labels follow the active bar without any programmatic chart scrolling.
+- [ ] As each new M5 candle forms, confirm guide lines span 20 M5 candles left and 20 right using time-based coordinates; labels track the right endpoint without touching the line, and the chart does not auto-scroll.
 - [ ] Confirm labels use a larger, thin/light font and the coordinated palette; the nearest text edge is offset away from the line with a visible gap. Labels must contain no price values, position IDs, or explanations.
-- [ ] Confirm every guide line has thickness 1; a qualified ENTRY is gold with a star, while unqualified or invalid pre-entry setups have no ENTRY/SL/TP drawings.
+- [ ] Confirm every guide line has thickness 1; a qualified ENTRY is gold with a star, and unqualified/invalid levels are dotted with a concise `SL!` or `TP!` label/status reason.
 - [ ] Confirm ENTRY is a conditional breakout level at a confirmed swing high/low with an ATR/spread buffer, not simply the current Ask/Bid.
 - [ ] Confirm pre-entry SL prefers the latest confirmed pivot with the configured strength, with a range-extreme fallback when no safe confirmed pivot can be used.
 - [ ] Compare the displayed pre-entry SL with the bot-installed initial SL in a manual Buy and Sell; aside from quote changes or the emergency safety fallback, the structural anchor and buffer should match.
-- [ ] Confirm pre-entry drawings require the stop on the correct loss side and safely beyond the market/broker gap; risk distance 0.25–2.25 ATR; cost-adjusted R:R at least 1.8 after spread/slippage reserve; spread/ATR at most 0.16; alignment at least 0.65; no extension; and closed-candle trend and momentum both support the side.
+- [ ] Confirm the displayed geometry—not only unsmoothed candidate values—is rechecked for stop side/safety, 0.25–2.25 ATR risk distance, net R:R ≥ 1.8, spread/ATR ≤ 0.16, alignment ≥ 0.65, no extended momentum, and closed-candle trend/momentum confirmation. When a nearby opposing structure prevents 1.8R, TP stays before it, is marked `TP!`, and the side status shows the low ratio; it must not project through the structure to fake qualification.
 - [ ] Test a nearby confirmed pivot target, no-pivot fallback, and the case where a pivot is too close to current price to be a valid target barrier.
 - [ ] Verify the lines are chart-only; no position/order is created and no active stop is implied by a proposed line.
 - [ ] During small quote/spread fluctuations, verify proposal lines stay stable; after a meaningful price/structure change, verify they update within the configured threshold/cooldown rules.
