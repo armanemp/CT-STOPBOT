@@ -853,11 +853,15 @@ namespace CTStopBot
             double stopPrice;
             double targetPrice;
             double rewardRisk;
+            double stopDistanceAtr;
             bool stopIsSafe;
+            bool stopUsesPivot;
             string setupContext;
 
             var calculated = TryCalculateMarketSideGuidance(tradeType, signalScore, atrPrice, overextended,
-                out entryPrice, out stopPrice, out targetPrice, out rewardRisk, out stopIsSafe, out setupContext);
+                trendText, momentumText,
+                out entryPrice, out stopPrice, out targetPrice, out rewardRisk,
+                out stopDistanceAtr, out stopIsSafe, out stopUsesPivot, out setupContext);
 
             if (totalPositions == 0)
             {
@@ -872,7 +876,11 @@ namespace CTStopBot
                 if (stopIsSafe)
                 {
                     var preTradeStopContext = string.Format(
-                        "pre-entry | align {0}/100 | {1} | {2} | spread/ATR {3:P1}",
+                        "pre-entry | {0} | risk {1:F2} ATR | {2} | align {3}/100 | {4}/{5} | spread/ATR {6:P1}",
+                        stopUsesPivot ? "confirmed pivot" : "range fallback",
+                        stopDistanceAtr,
+                        GetSetupQuality(tradeType, signalScore, spreadToAtr, overextended,
+                            rewardRisk, stopDistanceAtr, stopIsSafe, trendText, momentumText),
                         (int)Math.Round(50.0 + 50.0 * (tradeType == TradeType.Buy ? signalScore : -signalScore)),
                         trendText, momentumText, spreadToAtr);
                     DrawOrUpdateMarketGuide(sideKey + "_SL", tradeType, stopPrice, atrPrice,
@@ -894,9 +902,11 @@ namespace CTStopBot
                     RemoveMarketGuideObject(sideKey + "_TP");
                 }
 
-                sideStatus = string.Format("{0} | R:R {1:F1} | SL {2} | {3}",
-                    GetSetupQuality(tradeType, signalScore, spreadToAtr, overextended),
+                sideStatus = string.Format("{0} | R:R {1:F1} | risk {2:F2} ATR | SL {3} | {4}",
+                    GetSetupQuality(tradeType, signalScore, spreadToAtr, overextended,
+                        rewardRisk, stopDistanceAtr, stopIsSafe, trendText, momentumText),
                     rewardRisk,
+                    stopDistanceAtr,
                     stopIsSafe ? "candidate valid" : "UNSAFE / WAIT",
                     ShowSuggestedTpLine ? "levels are visual only" : "TP display disabled");
                 return;
@@ -937,18 +947,24 @@ namespace CTStopBot
             double signalScore,
             double atrPrice,
             bool overextended,
+            string trendText,
+            string momentumText,
             out double entryPrice,
             out double stopPrice,
             out double targetPrice,
             out double rewardRisk,
+            out double stopDistanceAtr,
             out bool stopIsSafe,
+            out bool stopUsesPivot,
             out string setupContext)
         {
             entryPrice = 0.0;
             stopPrice = 0.0;
             targetPrice = 0.0;
             rewardRisk = 0.0;
+            stopDistanceAtr = 0.0;
             stopIsSafe = false;
+            stopUsesPivot = false;
             setupContext = "WAIT";
 
             var lastClosedIndex = Bars.Count - 2;
