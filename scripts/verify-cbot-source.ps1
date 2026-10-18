@@ -20,7 +20,12 @@ $checks = @(
     @{ Name = "near structure warning is explicit"; Pattern = 'context \+= "/TIGHT";' },
     @{ Name = "labels use wider ATR gap"; Pattern = 'atrPrice \* 0\.25' },
     @{ Name = "initial stop is kept on loss side of ENTRY"; Pattern = 'rawPrice = Math\.Min\(rawPrice, position\.EntryPrice - minimumEntryRiskGap\)' },
-    @{ Name = "original R saved only from directionally-valid stop"; Pattern = 'var confirmedRisk = riskDirection \*' }
+    @{ Name = "original R saved only from directionally-valid stop"; Pattern = 'var confirmedRisk = riskDirection \*' },
+    @{ Name = "emergency initial stop is available without structure"; Pattern = 'TryCalculateEmergencyInitialStop\(' },
+    @{ Name = "emergency initial stop is loss-side"; Pattern = 'return direction \* \(position\.EntryPrice - stopPrice\) > Symbol\.TickSize;' },
+    @{ Name = "TP label remains concise"; Pattern = '"{0} \| \{1:F1\} pips"' },
+    @{ Name = "TP quality lives in status summary"; Pattern = 'GetOpenPositionTpQualitySummary\(' },
+    @{ Name = "next TP extends only after current target is reached"; Pattern = 'Do not move the target away merely because price is approaching it\.' }
 )
 
 foreach ($check in $checks) {
@@ -34,6 +39,9 @@ if ($source -match 'Chart\.DrawTrendLine\(lineName,\s*startBarIndex') {
 }
 if ($source -match 'Chart\.DrawText\(textName,\s*labelText,\s*endBarIndex') {
     throw "Invariant failed: future bar indices are still used for guide labels."
+}
+if ($source -match 'target - referencePrice\)\s*<=\s*minimumTargetDistance') {
+    throw "Invariant failed: the next TP is advanced while price is still approaching the current target."
 }
 if ($source -match 'ScrollXBy') {
     throw "Invariant failed: chart viewport auto-scrolling was reintroduced."
