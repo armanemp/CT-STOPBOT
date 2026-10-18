@@ -18,7 +18,9 @@ $checks = @(
     @{ Name = "position TP marks unknown original risk"; Pattern = 'context \+= "/R_UNKNOWN";' },
     @{ Name = "position TP marks unknown costs"; Pattern = 'context \+= "/COST_UNKNOWN";' },
     @{ Name = "near structure warning is explicit"; Pattern = 'context \+= "/TIGHT";' },
-    @{ Name = "labels use wider ATR gap"; Pattern = 'atrPrice \* 0\.25' }
+    @{ Name = "labels use wider ATR gap"; Pattern = 'atrPrice \* 0\.25' },
+    @{ Name = "initial stop is kept on loss side of ENTRY"; Pattern = 'rawPrice = Math\.Min\(rawPrice, position\.EntryPrice - minimumEntryRiskGap\)' },
+    @{ Name = "original R saved only from directionally-valid stop"; Pattern = 'var confirmedRisk = riskDirection \*' }
 )
 
 foreach ($check in $checks) {
