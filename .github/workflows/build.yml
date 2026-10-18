@@ -23,6 +23,14 @@ jobs:
         with:
           dotnet-version: 6.0.x
 
+      - name: Run risk-reward logic tests
+        shell: pwsh
+        run: dotnet run --project .\tests\CT-STOPBOT.Logic.Tests\CT-STOPBOT.Logic.Tests.csproj --configuration Release
+
+      - name: Verify cBot source invariants
+        shell: pwsh
+        run: .\scripts\verify-cbot-source.ps1
+
       - name: Restore and build cBot
         shell: pwsh
         run: dotnet build .\src\CT-STOPBOT\CT-STOPBOT.csproj --configuration Release -p:AlgoPublish=true -p:IncludeSource=false
