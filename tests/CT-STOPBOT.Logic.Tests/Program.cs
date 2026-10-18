@@ -12,6 +12,7 @@ internal static class Program
             RequiredRewardDistanceIncludesExecutionCosts();
             NetRewardRiskCalculatesCorrectly();
             StructuralCapsAreSymmetricForBuyAndSell();
+            OutwardRoundedTargetsAreRecappedBeforeStructure();
             NearStructureIsNeverSilentlyIgnored();
             StructureBeyondProjectedTargetDoesNotCap();
             InvalidInputsAreRejected();
@@ -64,6 +65,25 @@ internal static class Program
             100.0, 70.0, 75.0, 1.0, 0.5, -1, out target),
             "Sell target should cap before support");
         Near(76.0, target, 1e-10, "Sell cap leaves buffer before support");
+    }
+
+    private static void OutwardRoundedTargetsAreRecappedBeforeStructure()
+    {
+        double target;
+
+        // These target prices represent an outward-rounded tick that has crossed the
+        // structure even though the unrounded target was just before it.
+        Assert(RiskRewardEngine.TryCapTargetBeforeBarrier(
+            100.0, 100.01, 100.009, 0.001, 0.0001, 1, out target),
+            "outward-rounded Buy TP crossing resistance must be recapped");
+        Assert(target > 100.0 && target < 100.009,
+            "recapped Buy target must remain between entry and resistance");
+
+        Assert(RiskRewardEngine.TryCapTargetBeforeBarrier(
+            100.0, 99.99, 99.991, 0.001, 0.0001, -1, out target),
+            "outward-rounded Sell TP crossing support must be recapped");
+        Assert(target < 100.0 && target > 99.991,
+            "recapped Sell target must remain between support and entry");
     }
 
     private static void NearStructureIsNeverSilentlyIgnored()
