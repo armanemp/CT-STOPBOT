@@ -902,8 +902,7 @@ namespace CTStopBot
                 }
 
                 sideStatus = string.Format("{0} | R:R {1:F1} | risk {2:F2} ATR | SL {3} | {4}",
-                    GetSetupQuality(tradeType, signalScore, spreadToAtr, overextended,
-                        rewardRisk, stopDistanceAtr, stopIsSafe, trendText, momentumText),
+                    GetSetupQuality(tradeType, signalScore, spreadToAtr, overextended),
                     rewardRisk,
                     stopDistanceAtr,
                     stopIsSafe ? "candidate valid" : "UNSAFE / WAIT",
