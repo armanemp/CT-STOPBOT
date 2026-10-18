@@ -76,10 +76,10 @@ internal static class Program
             "close-structure target stays between entry and resistance");
 
         double rr;
-        Assert(RiskRewardEngine.TryCalculateNetRewardRisk(10.0, target - 100.0, 0.5, out rr),
-            "near-structure ratio should be measurable");
-        Assert(!RiskRewardEngine.MeetsMinimumNetRewardRisk(rr, 1.8),
-            "tight structural target should remain a no-trade setup, not be extended through resistance");
+        Assert(!RiskRewardEngine.TryCalculateNetRewardRisk(10.0, target - 100.0, 0.5, out rr),
+            "a target with no room beyond execution costs is invalid");
+        Assert(!RiskRewardEngine.MeetsMinimumNetRewardRisk(0.0, 1.8),
+            "tight structural target must remain a no-trade setup, not be extended through resistance");
     }
 
     private static void StructureBeyondProjectedTargetDoesNotCap()
