@@ -223,9 +223,12 @@ namespace CTStopBot
                 return;
             }
 
-            if (Bars.Count < 3)
+            var minimumBarsRequired = Math.Max(SwingLookback + 1, AtrPeriod + 2);
+            if (Bars.Count < minimumBarsRequired)
             {
-                NotifyThrottled(position.Id, "Not enough M5 candle history yet; stop calculation is waiting for more bars.");
+                NotifyThrottled(position.Id,
+                    string.Format("Not enough M5 history: {0} bars available, at least {1} required for the configured swing/ATR settings. Stop calculation is waiting.",
+                        Bars.Count, minimumBarsRequired));
                 return;
             }
 
@@ -522,7 +525,7 @@ namespace CTStopBot
             int failures;
             if (_failureCounts.TryGetValue(position.Id, out failures) && failures > 0)
             {
-                var exponent = Math.Min(failures, 8);
+                var exponent = Math.Min(Math.Max(0, failures - 1), 8);
                 var backoff = RetryCooldownSeconds * Math.Pow(2.0, exponent);
                 var maximumDelay = Math.Max(RetryCooldownSeconds, MaximumRetryCooldownSeconds);
                 retryDelay = (int)Math.Min(maximumDelay, backoff);
@@ -578,7 +581,7 @@ namespace CTStopBot
             failureCount = previousFailures + 1;
             _failureCounts[positionId] = failureCount;
 
-            var exponent = Math.Min(failureCount, 8);
+            var exponent = Math.Min(Math.Max(0, failureCount - 1), 8);
             var backoff = RetryCooldownSeconds * Math.Pow(2.0, exponent);
             var maximumDelay = Math.Max(RetryCooldownSeconds, MaximumRetryCooldownSeconds);
             return (int)Math.Min(maximumDelay, backoff);
