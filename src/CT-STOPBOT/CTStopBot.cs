@@ -2129,13 +2129,22 @@ namespace CTStopBot
             return IsSafeRelativeToMarket(stopPrice, position.TradeType);
         }
 
-        private double GetPreEntryCostReservePrice()
+        private double GetBaseExecutionCostReservePrice()
         {
             if (Symbol.PipSize <= 0 || Symbol.TickSize <= 0)
                 return 0.0;
 
             return Math.Max(Symbol.Spread, Symbol.TickSize) +
-                (SlippageReservePips + PreEntryCommissionReservePips) * Symbol.PipSize;
+                SlippageReservePips * Symbol.PipSize;
+        }
+
+        private double GetPreEntryCostReservePrice()
+        {
+            var baseReserve = GetBaseExecutionCostReservePrice();
+            if (Symbol.PipSize <= 0)
+                return baseReserve;
+
+            return baseReserve + PreEntryCommissionReservePips * Symbol.PipSize;
         }
 
         private bool TryGetEstimatedRoundTripCostCash(Position position, out double costCash)
@@ -2159,7 +2168,7 @@ namespace CTStopBot
 
         private bool TryGetPositionCostReservePrice(Position position, out double costReserve)
         {
-            costReserve = GetPreEntryCostReservePrice();
+            costReserve = GetBaseExecutionCostReservePrice();
             if (position == null || Symbol.PipSize <= 0 || Symbol.TickSize <= 0 ||
                 double.IsNaN(costReserve) || double.IsInfinity(costReserve))
                 return false;
