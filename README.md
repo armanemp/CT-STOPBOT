@@ -16,6 +16,9 @@ Initial target: XAUUSD / Gold on the 5-minute chart. The first iteration focuses
 - Tightens an existing stop using recent closed-candle structure; never intentionally moves it away from the market.
 - Logs rejected/failed modifications and retries after a cooldown.
 - Includes a label filter for users who do not want to manage every position on the selected symbol.
+- Supports independent switches for initial stop, break-even and structural trailing; position-level exceptions are logged instead of silently aborting the management loop.
+- Leaves positions with native server-side trailing untouched by default and preserves stop trigger/trailing settings when a stop is modified.
+- Supports a minimum commission-cost reserve for broker schedules where the observed opening commission is zero or below the true round-trip minimum.
 
 ## Repository workflow (Windows)
 
@@ -47,3 +50,4 @@ After a successful build, open cTrader Desktop → Algo → cBots and confirm th
 - `src/CT-STOPBOT/CT-STOPBOT.csproj` — build configuration
 - `docs/STRATEGY.md` — decisions, cost model, and limitations
 - `docs/TEST_PLAN.md` — demo-account test checklist
+- `docs/REPORT_FA.md` — detailed Persian audit, behaviour guide, known limitations and demo plan
