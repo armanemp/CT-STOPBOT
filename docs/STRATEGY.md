@@ -53,6 +53,18 @@ The recommendation uses the last **closed** M5 candle for EMA 9/21 trend, close-
 
 To avoid visual jitter, a price update requires at least the larger of the configured ATR fraction and pip threshold, and it is throttled by the update cooldown. Crossing the old target forces a refresh. The line is an informational scenario only: it is not an actual TP order, does not account for every future spread/commission/execution change, and does not guarantee that a market path will reach it.
 
+## Pre-trade guidance and handover to live positions
+
+When enabled, the chart shows independent BUY and SELL scenarios before entry. The market panel uses the last closed M5 candle and EMA 9/21/50, momentum over three bars, RSI 14, ATR and recent volatility regime. A directional alignment index combines these components; it is a heuristic scale from 0 to 100, **not a probability and not an entry signal**. A spread/ATR filter marks setups as waiting when spread is disproportionately large. Very stretched RSI readings reduce the alignment score and may mark the setup as extended.
+
+The pre-entry SL proposal uses the same structural ingredients as initial SL placement: the lowest low/highest high over the configured swing lookback, buffered by the maximum of ATR, spread and minimum wick buffer. It is drawn only while safe relative to the live quote and the configured/broker distance. The TP idea projects from current Ask (Buy) or Bid (Sell), scales ATR distance by trend/momentum alignment, and can be capped by the nearest valid historical resistance/support. R:R shown in the panel is a price-distance estimate; it ignores future slippage/fees and is not expected profit.
+
+Small candidate changes are ignored until they exceed the larger of the configured pip or ATR movement threshold. A cooldown reduces chart-object churn. If an existing TP idea is reached, a new forward objective is recalculated. The chart condition panel is throttled; the numeric levels stay visible on the lines.
+
+On a matching position's open event, the cBot attempts to install its initial stop if the position lacks one. The generic pre-entry SL line is hidden for that direction only when all matching open positions are observed with an absolute SL, native server-side break-even rule, or server-side trailing protection. If any matching position is unprotected, the panel warns and the line remains explicitly labelled as a warning—not as an active order. The generic pre-entry TP line is replaced by per-position TP suggestions, which continue to update independently until each position closes. No entry is opened and Position.TakeProfit is not changed.
+
+The idea levels depend on the active M5 chart, broker symbol metadata and loaded history. There is no validated statistical expectancy behind the score or target projection yet; evaluate it on replay and demo before relying on it.
+
 ## Broker-specific constraints to confirm
 
 - Gold symbol name, digits, tick size, pip size and spread regime.
