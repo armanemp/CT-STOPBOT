@@ -17,7 +17,7 @@ By default it manages all position labels on that symbol, including manual posit
 4. Round away from the market using the symbol tick size.
 5. Do not submit the level if it is already too close to or beyond the current close-side quote. If the broker rejects an update, log the error and retry after a cooldown.
 
-An existing stop is preserved; the cBot does not widen it. This is a simple structural baseline and needs demo observation to tune to the broker's Gold feed.
+An existing stop is preserved; the cBot does not widen it. If the structural candidate is already too close to or through the current quote, the bot logs a warning and calculates a fallback beyond the current quote. This can indicate that the structural level has already been invalidated; inspect the position promptly and verify any fallback/rejection in the logs. This is a simple structural baseline and needs demo observation to tune to the broker's Gold feed.
 
 ## Cost-aware break-even estimate
 
