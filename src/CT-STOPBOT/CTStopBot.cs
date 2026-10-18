@@ -613,6 +613,20 @@ namespace CTStopBot
             return !double.IsNaN(targetPrice) && !double.IsInfinity(targetPrice);
         }
 
+        private double NormalizeTargetBeforeStructureBarrier(double price, TradeType tradeType)
+        {
+            if (Symbol.TickSize <= 0)
+                return Math.Round(price, Symbol.Digits, MidpointRounding.AwayFromZero);
+
+            // Keep a structure-capped Buy target below resistance and a Sell target
+            // above support. Do not round a capped target through the barrier.
+            var ticks = price / Symbol.TickSize;
+            var normalized = tradeType == TradeType.Buy
+                ? Math.Floor(ticks + 1e-10) * Symbol.TickSize
+                : Math.Ceiling(ticks - 1e-10) * Symbol.TickSize;
+            return Math.Round(normalized, Symbol.Digits, MidpointRounding.AwayFromZero);
+        }
+
         private double NormalizeSuggestedTpPrice(double price, TradeType tradeType)
         {
             if (Symbol.TickSize <= 0)
@@ -1138,6 +1152,21 @@ namespace CTStopBot
             var minimumTargetDistance = Math.Max(Symbol.TickSize * 3.0,
                 Math.Max(Symbol.Spread * 1.5, atrPrice * 0.35));
             var projectedDistance = Math.Max(atrPrice * atrMultiplier, minimumTargetDistance);
+
+            // Build TP distance from the actual ENTRY-to-SL risk, not only an ATR estimate.
+            // A nearby structure may cap this target; the final R:R check then rejects it
+            // rather than allowing the TP to ignore a resistance/support barrier.
+            var directionalRiskBeforeCosts = direction * (entryPrice - stopPrice);
+            var requiredMinimumRewardRisk = Math.Max(MinimumQualityRewardRisk, MinimumPreTradeRewardRisk);
+            var executionCostReserve = Math.Max(Symbol.Spread, Symbol.TickSize)
+                + SlippageReservePips * Symbol.PipSize;
+            if (directionalRiskBeforeCosts > Symbol.TickSize)
+            {
+                var minimumRewardDistanceForRisk = requiredMinimumRewardRisk *
+                    (directionalRiskBeforeCosts + executionCostReserve) + executionCostReserve;
+                projectedDistance = Math.Max(projectedDistance, minimumRewardDistanceForRisk);
+            }
+
             var target = entryPrice + direction * projectedDistance;
 
             double nearestLevel;
@@ -1186,7 +1215,9 @@ namespace CTStopBot
                 }
             }
 
-            targetPrice = NormalizeSuggestedTpPrice(target, tradeType);
+            targetPrice = usedStructure
+                ? NormalizeTargetBeforeStructureBarrier(target, tradeType)
+                : NormalizeSuggestedTpPrice(target, tradeType);
             if (!IsFinitePositive(entryPrice) ||
                 direction * (targetPrice - entryPrice) <= 0.0)
                 return false;
