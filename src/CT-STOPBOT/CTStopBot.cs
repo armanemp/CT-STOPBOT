@@ -141,7 +141,8 @@ namespace CTStopBot
         private readonly Dictionary<string, DateTime> _marketGuideUpdatedAt = new Dictionary<string, DateTime>();
         private readonly Dictionary<string, DateTime> _marketGuideStartTimes = new Dictionary<string, DateTime>();
         private readonly Dictionary<string, string> _marketGuideContexts = new Dictionary<string, string>();
-        private const int GuideLabelOffsetBars = 40;
+        private const int GuideLineBarsLeft = 20;
+        private const int GuideLineBarsRight = 40;
         private DateTime _lastFutureSpaceBarTime = DateTime.MinValue;
         private bool _futureSpaceInitialized;
 
@@ -615,17 +616,24 @@ namespace CTStopBot
 
         private void DrawSuggestedTpObjects(Position position, double targetPrice, string context)
         {
-            var startTime = Bars.OpenTimes[Bars.Count - 1];
-            var endTime = startTime.AddMinutes(GuideLabelOffsetBars * 5.0);
+            var currentBarTime = Bars.OpenTimes[Bars.Count - 1];
+            var startTime = currentBarTime.AddMinutes(-GuideLineBarsLeft * 5.0);
+            var endTime = currentBarTime.AddMinutes(GuideLineBarsRight * 5.0);
             var color = Color.FromHex("#438D7F");
             var lineName = GetSuggestedTpLineName(position.Id);
             var textName = GetSuggestedTpTextName(position.Id);
-            var line = Chart.DrawHorizontalLine(lineName, targetPrice, color, 2, LineStyle.Solid);
+            var line = Chart.DrawTrendLine(lineName, startTime, targetPrice, endTime, targetPrice,
+                color, 1, LineStyle.Solid);
+            line.ExtendToInfinity = false;
 
             var distancePips = Symbol.PipSize > 0 ? Math.Abs(targetPrice - position.EntryPrice) / Symbol.PipSize : 0.0;
+            var labelOffset = GetGuideLabelOffsetPrice(GetCurrentAtrPrice());
+            var labelPrice = position.TradeType == TradeType.Buy
+                ? targetPrice + labelOffset
+                : targetPrice - labelOffset;
             var label = Chart.DrawText(textName,
                 string.Format("TP | {0:F1} pips", distancePips),
-                endTime, targetPrice, color);
+                endTime, labelPrice, color);
             label.FontSize = 14;
             label.FontFamily = "Segoe UI Light";
             label.IsBold = false;
@@ -1212,21 +1220,23 @@ namespace CTStopBot
             var styleChanged = !_marketGuideContexts.TryGetValue(key, out previousStyle) ||
                 !string.Equals(previousStyle, styleKey, StringComparison.Ordinal);
 
-            var startTime = Bars.OpenTimes[Bars.Count - 1];
+            var currentBarTime = Bars.OpenTimes[Bars.Count - 1];
+            var startTime = currentBarTime.AddMinutes(-GuideLineBarsLeft * 5.0);
             DateTime lastStartTime;
-            var newBar = !_marketGuideStartTimes.TryGetValue(key, out lastStartTime) || lastStartTime != startTime;
-            var endTime = startTime.AddMinutes(GuideLabelOffsetBars * 5.0);
+            var newBar = !_marketGuideStartTimes.TryGetValue(key, out lastStartTime) || lastStartTime != currentBarTime;
+            var endTime = currentBarTime.AddMinutes(GuideLineBarsRight * 5.0);
             var lineName = GetMarketGuideLineName(key);
             var textName = GetMarketGuideTextName(key);
 
             if (!hasPrevious || priceChanged || styleChanged || levelReached || newBar)
             {
-                var thickness = highConfidence ? 3 : 2;
                 var style = isEntry && !highConfidence ? LineStyle.Dots : LineStyle.Solid;
-                var line = Chart.DrawHorizontalLine(lineName, displayPrice, color, thickness, style);
+                var line = Chart.DrawTrendLine(lineName, startTime, displayPrice, endTime, displayPrice,
+                    color, 1, style);
+                line.ExtendToInfinity = false;
                 _marketGuidePrices[key] = displayPrice;
                 _marketGuideUpdatedAt[key] = Server.Time;
-                _marketGuideStartTimes[key] = startTime;
+                _marketGuideStartTimes[key] = currentBarTime;
             }
 
             var distancePips = Symbol.PipSize > 0
@@ -1234,7 +1244,12 @@ namespace CTStopBot
                 : 0.0;
             var labelText = isEntry && highConfidence ? "★ " : string.Empty;
             labelText += string.Format("{0} | {1:F1} pips", title, distancePips);
-            var label = Chart.DrawText(textName, labelText, endTime, displayPrice, color);
+            var labelOffset = GetGuideLabelOffsetPrice(atrPrice);
+            var labelAbove = (isEntry || isTakeProfit)
+                ? tradeType == TradeType.Buy
+                : tradeType == TradeType.Sell;
+            var labelPrice = displayPrice + (labelAbove ? labelOffset : -labelOffset);
+            var label = Chart.DrawText(textName, labelText, endTime, labelPrice, color);
             label.FontSize = 14;
             label.FontFamily = "Segoe UI Light";
             label.IsBold = false;
@@ -1242,6 +1257,27 @@ namespace CTStopBot
             label.VerticalAlignment = VerticalAlignment.Center;
 
             _marketGuideContexts[key] = styleKey;
+        }
+
+        private double GetCurrentAtrPrice()
+        {
+            var index = Bars.Count - 2;
+            if (_atr == null || index < 0 || index >= _atr.Result.Count)
+                return 0.0;
+
+            var atrPrice = _atr.Result[index];
+            return IsFinitePositive(atrPrice) ? atrPrice : 0.0;
+        }
+
+        private double GetGuideLabelOffsetPrice(double atrPrice)
+        {
+            var offset = Math.Max(Symbol.TickSize * 4.0, Symbol.PipSize * 2.0);
+            if (IsFinitePositive(atrPrice))
+                offset = Math.Max(offset, atrPrice * 0.035);
+            if (IsFinitePositive(Symbol.Spread))
+                offset = Math.Max(offset, Symbol.Spread * 1.25);
+
+            return offset;
         }
 
         private void KeepGuideLabelsToRight()
@@ -1252,15 +1288,14 @@ namespace CTStopBot
             var currentBarTime = Bars.OpenTimes[Bars.Count - 1];
             if (!_futureSpaceInitialized)
             {
-                // Shift the viewport into the future blank area so labels anchored at
-                // current-bar + 40 M5 intervals are actually visible, not over candles.
-                Chart.ScrollXBy(GuideLabelOffsetBars);
+                // Scroll into the future so the +40-bar line endpoint and labels remain visible.
+                Chart.ScrollXBy(GuideLineBarsRight);
                 _futureSpaceInitialized = true;
                 _lastFutureSpaceBarTime = currentBarTime;
                 return;
             }
 
-            // Keep the same 40-bar gap as new M5 candles arrive.
+            // Track new candles so the +40-bar endpoint stays in view.
             if (currentBarTime != _lastFutureSpaceBarTime)
             {
                 Chart.ScrollXBy(1);
