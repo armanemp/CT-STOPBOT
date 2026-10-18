@@ -68,17 +68,17 @@ Do not skip these tests before live use. Record the broker, account type, symbol
 
 ## Pre-entry guidance and position handover
 
-- [ ] Start with no positions and sufficient M5 history; confirm BUY and SELL each draw separate ENTRY, SL and TP horizontal guide lines.
-- [ ] Confirm all ENTRY, SL and TP price lines are visible as horizontal lines across the chart at their respective price levels.
+- [ ] Start with no positions and sufficient M5 history; confirm only side(s) meeting every strict quality criterion draw ENTRY, SL and TP guide lines. Unqualified sides must not leave muted, low-quality pseudo-signals.
+- [ ] On a qualified setup, confirm ENTRY, SL and TP lines match their respective price levels and have thickness 1.
 - [ ] Confirm no verbose static market panel remains, and each line label contains only its short name plus distance in pips; no entry, TP or SL price number and no per-position ID appears.
-- [ ] Confirm the chart automatically exposes right-side blank space on start and places labels 40 M5 bars after the latest candle, not on or directly beside the candles.
-- [ ] As each new M5 candle forms, confirm the chart remains shifted enough to keep the labels 40 bars ahead.
-- [ ] Confirm labels use a larger, thin/light font and the dark coordinated palette; line labels should not display extra context, prices, or explanations.
-- [ ] Confirm a high-confidence setup gets a thicker gold ENTRY line with a star, while ordinary entry suggestions are subdued and dotted.
+- [ ] Confirm the chart viewport does not jump on cBot start or reload, and lines span from 20 actual bar indices before the active candle to 20 after it.
+- [ ] As each new M5 candle forms, confirm the guide endpoints and labels follow the active bar without any programmatic chart scrolling.
+- [ ] Confirm labels use a larger, thin/light font and the coordinated palette; the nearest text edge is offset away from the line with a visible gap. Labels must contain no price values, position IDs, or explanations.
+- [ ] Confirm every guide line has thickness 1; a qualified ENTRY is gold with a star, while unqualified or invalid pre-entry setups have no ENTRY/SL/TP drawings.
 - [ ] Confirm ENTRY is a conditional breakout level at a confirmed swing high/low with an ATR/spread buffer, not simply the current Ask/Bid.
 - [ ] Confirm pre-entry SL prefers the latest confirmed pivot with the configured strength, with a range-extreme fallback when no safe confirmed pivot can be used.
 - [ ] Compare the displayed pre-entry SL with the bot-installed initial SL in a manual Buy and Sell; aside from quote changes or the emergency safety fallback, the structural anchor and buffer should match.
-- [ ] Confirm a strong visual highlight requires directional alignment, matching trend/momentum, a safe SL, acceptable spread, no extended momentum, stop distance within the default 2.5 ATR maximum, and R:R at or above the default 1.5 minimum.
+- [ ] Confirm pre-entry drawings require the stop on the correct loss side and safely beyond the market/broker gap; risk distance 0.25–2.25 ATR; cost-adjusted R:R at least 1.8 after spread/slippage reserve; spread/ATR at most 0.16; alignment at least 0.65; no extension; and closed-candle trend and momentum both support the side.
 - [ ] Test a nearby confirmed pivot target, no-pivot fallback, and the case where a pivot is too close to current price to be a valid target barrier.
 - [ ] Verify the lines are chart-only; no position/order is created and no active stop is implied by a proposed line.
 - [ ] During small quote/spread fluctuations, verify proposal lines stay stable; after a meaningful price/structure change, verify they update within the configured threshold/cooldown rules.
