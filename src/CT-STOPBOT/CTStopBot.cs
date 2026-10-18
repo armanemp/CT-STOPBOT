@@ -2107,6 +2107,19 @@ namespace CTStopBot
                 ? swingLow - buffer
                 : swingHigh + buffer;
 
+            if (allowFallback)
+            {
+                // Initial protection must be a genuine loss-side SL so its distance
+                // from Entry remains a valid initial R. A fast favourable move between
+                // entry and installation must not turn a profit-side stop into fake R.
+                var minimumEntryRiskGap = Math.Max(
+                    Symbol.TickSize, MinimumWickBufferPips * Symbol.PipSize);
+                if (position.TradeType == TradeType.Buy)
+                    rawPrice = Math.Min(rawPrice, position.EntryPrice - minimumEntryRiskGap);
+                else
+                    rawPrice = Math.Max(rawPrice, position.EntryPrice + minimumEntryRiskGap);
+            }
+
             stopPrice = NormalizeStopPrice(rawPrice, position.TradeType);
 
             if (!IsSafeRelativeToMarket(stopPrice, position.TradeType))
@@ -2376,9 +2389,19 @@ namespace CTStopBot
                 _failureCounts.Remove(position.Id);
                 if (isInitial && confirmedPosition.StopLoss.HasValue)
                 {
-                    var confirmedRisk = Math.Abs(confirmedPosition.EntryPrice - confirmedPosition.StopLoss.Value);
-                    if (confirmedRisk > Symbol.TickSize)
+                    var riskDirection = confirmedPosition.TradeType == TradeType.Buy ? 1.0 : -1.0;
+                    var confirmedRisk = riskDirection *
+                        (confirmedPosition.EntryPrice - confirmedPosition.StopLoss.Value);
+                    if (IsFinitePositive(confirmedRisk) && confirmedRisk > Symbol.TickSize)
+                    {
                         SaveInitialRiskRecord(confirmedPosition, confirmedRisk, false);
+                    }
+                    else
+                    {
+                        Print("ERROR position {0}: initial SL confirmation is not on the loss side of ENTRY; original R was not saved and BE/trailing remain blocked. ENTRY={1}; confirmed SL={2}.",
+                            confirmedPosition.Id, confirmedPosition.EntryPrice,
+                            confirmedPosition.StopLoss.Value);
+                    }
                 }
                 Print("Position {0}: {1} CONFIRMED by refreshed position state at SL={2}; Pips={3:F2}, NetProfit={4:F2}, volume={5}.",
                     position.Id, reason, confirmedPosition.StopLoss.Value,
