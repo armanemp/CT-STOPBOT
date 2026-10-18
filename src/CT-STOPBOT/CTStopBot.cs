@@ -103,6 +103,16 @@ namespace CTStopBot
                 return;
             }
 
+            if (Symbol.PipSize <= 0 || Symbol.TickSize <= 0)
+            {
+                Print("CT-STOPBOT stopped: invalid symbol metadata. PipSize={0}, TickSize={1}.", Symbol.PipSize, Symbol.TickSize);
+                Stop();
+                return;
+            }
+
+            if (Symbol.PipValue <= 0)
+                Print("WARNING: Symbol.PipValue is not positive; cost-aware break-even will be unavailable until the symbol/account metadata provides a valid value.");
+
             _atr = Indicators.AverageTrueRange(Bars, AtrPeriod, MovingAverageType.Simple);
 
             Positions.Opened += OnPositionOpened;
@@ -149,6 +159,7 @@ namespace CTStopBot
 
         private void OnPositionClosed(PositionClosedEventArgs args)
         {
+            Print("Position {0} closed. Reason={1}.", args.Position.Id, args.Reason);
             _lastAttemptAt.Remove(args.Position.Id);
             _lastNoticeAt.Remove(args.Position.Id);
             _failureCounts.Remove(args.Position.Id);
@@ -184,7 +195,7 @@ namespace CTStopBot
             catch (Exception ex)
             {
                 if (position != null)
-                    NotifyThrottled(position.Id, "Unexpected exception during position management: " + ex.Message);
+                    NotifyThrottled(position.Id, "Unexpected exception during position management: " + ex);
                 else
                     Print("CT-STOPBOT warning: unexpected exception while managing a null position: {0}", ex.Message);
             }
@@ -219,7 +230,7 @@ namespace CTStopBot
                 }
 
                 double initialStop;
-                if (!TryCalculateStructuralStop(position, InitialAtrBuffer, out initialStop))
+                if (!TryCalculateStructuralStop(position, InitialAtrBuffer, true, out initialStop))
                 {
                     NotifyThrottled(position.Id,
                         "Initial stop was not submitted: no safe closed-candle swing price is currently available. The position may remain unprotected; check logs and broker rules.");
@@ -262,7 +273,7 @@ namespace CTStopBot
             // for Sell so trailing cannot loosen a stop or a break-even level.
             double trailingStop;
             if (EnableStructureTrailing &&
-                TryCalculateStructuralStop(position, TrailingAtrBuffer, out trailingStop) &&
+                TryCalculateStructuralStop(position, TrailingAtrBuffer, false, out trailingStop) &&
                 IsSafeRelativeToMarket(trailingStop, position.TradeType) &&
                 IsMoreProtective(trailingStop, bestStop, position.TradeType))
             {
@@ -287,7 +298,7 @@ namespace CTStopBot
             TryModifyStop(position, bestStop, false, improvementThreshold, reason);
         }
 
-        private bool TryCalculateStructuralStop(Position position, double atrMultiplier, out double stopPrice)
+        private bool TryCalculateStructuralStop(Position position, double atrMultiplier, bool allowFallback, out double stopPrice)
         {
             stopPrice = 0.0;
 
@@ -325,11 +336,17 @@ namespace CTStopBot
 
             if (!IsSafeRelativeToMarket(stopPrice, position.TradeType))
             {
-                // The original swing stop may already have been crossed or may be
-                // too close to market to submit. Use an explicitly warned fallback
-                // beyond the current quote so the position is not silently ignored.
+                if (!allowFallback)
+                {
+                    NotifyThrottled(position.Id,
+                        "Structural trailing candidate is no longer safely beyond the current quote; skipping this trailing update rather than snapping the stop close to market.");
+                    return false;
+                }
+
+                // For a missing initial stop only, try an explicitly warned fallback
+                // beyond the current quote. A broken structure needs immediate review.
                 NotifyThrottled(position.Id,
-                    "Structural stop is already at/beyond the safe market gap; trying a fallback stop beyond the current quote. Review the position immediately because its structural level may have been invalidated.");
+                    "Initial structural stop is at/beyond the safe market gap; trying a fallback stop beyond the current quote. Review immediately because the original swing may have been invalidated.");
 
                 var fallbackGap = Math.Max(GetRequiredMarketGap(position.TradeType), buffer);
                 rawPrice = position.TradeType == TradeType.Buy
@@ -418,6 +435,13 @@ namespace CTStopBot
 
         private bool IsSafeRelativeToMarket(double stopPrice, TradeType tradeType)
         {
+            if (double.IsNaN(stopPrice) || double.IsInfinity(stopPrice) ||
+                Symbol.PipSize <= 0 || Symbol.TickSize <= 0 ||
+                Symbol.Bid <= 0 || Symbol.Ask <= 0 ||
+                double.IsNaN(Symbol.Bid) || double.IsNaN(Symbol.Ask) ||
+                double.IsInfinity(Symbol.Bid) || double.IsInfinity(Symbol.Ask))
+                return false;
+
             var minimumGap = GetRequiredMarketGap(tradeType);
 
             if (tradeType == TradeType.Buy)
