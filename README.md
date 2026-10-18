@@ -10,7 +10,9 @@ Initial target: XAUUSD / Gold on the 5-minute chart. The first iteration focuses
 - Requires an M5 chart and a symbol name containing the configured string (default: XAUUSD; change the filter for a broker-specific name such as GOLD).
 - Places an initial protective stop beyond recent closed-candle swing structure, with an ATR/spread-aware buffer.
 - Preserves an existing stop instead of replacing it with a potentially worse initial stop.
-- Estimates a cost-aware break-even price using observed position commission, a round-trip commission multiplier, current spread, and configurable slippage/cost reserves.
+- Estimates a cost-aware break-even price using one-way opening commission, already-accrued negative swap, a round-trip commission multiplier, current spread, and configurable slippage/cost reserves.
+- Uses the broker-reported minimum stop-loss distance where available (in pips or percentage units), alongside the configured minimum gap.
+- Prints diagnostic symbol data at startup, including spread, pip/tick sizes, pip value, and broker minimum stop distance.
 - Tightens an existing stop using recent closed-candle structure; never intentionally moves it away from the market.
 - Logs rejected/failed modifications and retries after a cooldown.
 - Includes a label filter for users who do not want to manage every position on the selected symbol.
