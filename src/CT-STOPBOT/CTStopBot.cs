@@ -53,7 +53,7 @@ namespace CTStopBot
         [Parameter("Show pre-trade SL/TP guidance and market conditions", DefaultValue = true)]
         public bool ShowPreTradeGuidance { get; set; }
 
-        [Parameter("Maximum spread / ATR ratio for favorable setup", DefaultValue = 0.18, MinValue = 0.01, MaxValue = 1.0)]
+        [Parameter("Maximum spread / ATR ratio for favorable setup", DefaultValue = 0.16, MinValue = 0.01, MaxValue = 1.0)]
         public double MaxSpreadToAtrRatio { get; set; }
 
         [Parameter("Pre-trade guide minimum update move (ATR)", DefaultValue = 0.12, MinValue = 0.01, MaxValue = 2.0)]
@@ -65,10 +65,10 @@ namespace CTStopBot
         [Parameter("Pre-trade guide update cooldown (seconds)", DefaultValue = 3, MinValue = 0, MaxValue = 120)]
         public int GuideUpdateCooldownSeconds { get; set; }
 
-        [Parameter("Minimum pre-trade reward/risk filter", DefaultValue = 1.5, MinValue = 0.5, MaxValue = 5.0)]
+        [Parameter("Minimum pre-trade reward/risk filter", DefaultValue = 1.8, MinValue = 0.5, MaxValue = 5.0)]
         public double MinimumPreTradeRewardRisk { get; set; }
 
-        [Parameter("Maximum pre-trade SL distance (ATR)", DefaultValue = 2.5, MinValue = 0.5, MaxValue = 10.0)]
+        [Parameter("Maximum pre-trade SL distance (ATR)", DefaultValue = 2.25, MinValue = 0.5, MaxValue = 10.0)]
         public double MaximumPreTradeStopDistanceAtr { get; set; }
 
         [Parameter("Confirmed pivot strength (bars each side)", DefaultValue = 2, MinValue = 1, MaxValue = 5)]
@@ -430,6 +430,18 @@ namespace CTStopBot
                     return;
                 }
 
+                double liveRewardRisk;
+                if (position.StopLoss.HasValue &&
+                    IsStopStillOnLossSide(position) &&
+                    !TryGetCostAdjustedRewardRisk(position.EntryPrice, position.StopLoss.Value, candidate,
+                        position.TradeType, out liveRewardRisk))
+                {
+                    RemoveSuggestedTpObjects(position.Id);
+                    NotifyThrottled(position.Id,
+                        "Suggested TP hidden: target does not meet the minimum cost-adjusted reward/risk filter against the current SL. No TP order was changed.");
+                    return;
+                }
+
                 double previousPrice;
                 var hasPrevious = _suggestedTpPrices.TryGetValue(position.Id, out previousPrice);
                 var targetWasReached = hasPrevious && IsSuggestedTargetReached(previousPrice, position.TradeType);
@@ -626,6 +638,7 @@ namespace CTStopBot
             var labelPrice = position.TradeType == TradeType.Buy
                 ? targetPrice + labelOffset
                 : targetPrice - labelOffset;
+            var labelAbove = position.TradeType == TradeType.Buy;
             var label = Chart.DrawText(textName,
                 string.Format("TP | {0:F1} pips", distancePips),
                 endBarIndex, labelPrice, color);
@@ -633,7 +646,7 @@ namespace CTStopBot
             label.FontFamily = "Segoe UI Light";
             label.IsBold = false;
             label.HorizontalAlignment = HorizontalAlignment.Left;
-            label.VerticalAlignment = VerticalAlignment.Center;
+            label.VerticalAlignment = labelAbove ? VerticalAlignment.Bottom : VerticalAlignment.Top;
             _suggestedTpStartTimes[position.Id] = Bars.OpenTimes[Bars.Count - 1];
         }
 
@@ -858,24 +871,47 @@ namespace CTStopBot
             var sideAlignment = tradeType == TradeType.Buy ? signalScore : -signalScore;
             var trendSupportsSide = tradeType == TradeType.Buy ? trendText == "BULLISH" : trendText == "BEARISH";
             var momentumSupportsSide = tradeType == TradeType.Buy ? momentumText == "UP" : momentumText == "DOWN";
-            var highConfidence = calculated && stopIsSafe && !overextended &&
-                spreadToAtr <= MaxSpreadToAtrRatio &&
-                stopDistanceAtr <= MaximumPreTradeStopDistanceAtr &&
-                rewardRisk >= MinimumPreTradeRewardRisk &&
-                sideAlignment >= 0.60 && trendSupportsSide && momentumSupportsSide;
+            var direction = tradeType == TradeType.Buy ? 1.0 : -1.0;
+            var minimumStructuralRisk = Math.Max(atrPrice * 0.25,
+                Math.Max(Symbol.Spread * 2.0, Symbol.TickSize * 4.0));
+            var directionalRisk = direction * (entryPrice - stopPrice);
+            var directionalReward = direction * (targetPrice - entryPrice);
+            var stopOnCorrectSide = calculated && directionalRisk >= minimumStructuralRisk;
+            var targetOnCorrectSide = calculated &&
+                directionalReward > Math.Max(Symbol.TickSize * 2.0, Symbol.Spread * 1.5);
 
-            if (calculated)
-            {
-                if (!stopIsSafe)
-                    setupQuality = "WAIT — SL invalid at current quote/broker gap";
-                else if (stopDistanceAtr > MaximumPreTradeStopDistanceAtr)
-                    setupQuality = "WAIT — structural SL too wide";
-                else if (rewardRisk < MinimumPreTradeRewardRisk)
-                    setupQuality = "WAIT — reward/risk below filter";
-                else if ((tradeType == TradeType.Buy && trendText == "BEARISH" && momentumText == "DOWN") ||
-                         (tradeType == TradeType.Sell && trendText == "BULLISH" && momentumText == "UP"))
-                    setupQuality = "WAIT — trend and momentum oppose this side";
-            }
+            var highConfidence = calculated && stopIsSafe && stopOnCorrectSide && targetOnCorrectSide &&
+                !overextended && spreadToAtr <= MaxSpreadToAtrRatio &&
+                stopDistanceAtr >= 0.25 && stopDistanceAtr <= MaximumPreTradeStopDistanceAtr &&
+                rewardRisk >= MinimumPreTradeRewardRisk &&
+                sideAlignment >= 0.65 && trendSupportsSide && momentumSupportsSide;
+
+            if (!calculated)
+                setupQuality = "WAIT — no valid structural setup";
+            else if (!stopIsSafe)
+                setupQuality = "WAIT — SL invalid at current quote/broker gap";
+            else if (!stopOnCorrectSide)
+                setupQuality = "WAIT — SL is too close or on the wrong side of ENTRY";
+            else if (!targetOnCorrectSide)
+                setupQuality = "WAIT — TP is too close or on the wrong side of ENTRY";
+            else if (stopDistanceAtr < 0.25)
+                setupQuality = "WAIT — structural SL is too tight/noise-sensitive";
+            else if (stopDistanceAtr > MaximumPreTradeStopDistanceAtr)
+                setupQuality = "WAIT — structural SL too wide";
+            else if (rewardRisk < MinimumPreTradeRewardRisk)
+                setupQuality = "WAIT — cost-adjusted reward/risk below filter";
+            else if (spreadToAtr > MaxSpreadToAtrRatio)
+                setupQuality = "WAIT — spread/ATR too high";
+            else if (overextended)
+                setupQuality = "WAIT — RSI/momentum stretched";
+            else if (sideAlignment < 0.65)
+                setupQuality = "WAIT — directional alignment is not strong enough";
+            else if (!trendSupportsSide)
+                setupQuality = "WAIT — trend structure does not confirm this side";
+            else if (!momentumSupportsSide)
+                setupQuality = "WAIT — closed-candle momentum is not confirmed";
+            else
+                setupQuality = "QUALIFIED — structure, trend, momentum and R:R passed";
 
             if (totalPositions == 0)
             {
@@ -885,6 +921,15 @@ namespace CTStopBot
                     RemoveMarketGuideObject(sideKey + "_SL");
                     RemoveMarketGuideObject(sideKey + "_TP");
                     sideStatus = "waiting for valid data";
+                    return;
+                }
+
+                if (!highConfidence)
+                {
+                    RemoveMarketGuideObject(sideKey + "_ENTRY");
+                    RemoveMarketGuideObject(sideKey + "_SL");
+                    RemoveMarketGuideObject(sideKey + "_TP");
+                    sideStatus = setupQuality;
                     return;
                 }
 
@@ -1114,9 +1159,20 @@ namespace CTStopBot
                 direction * (targetPrice - entryPrice) <= 0.0)
                 return false;
 
-            var riskDistance = Math.Abs(entryPrice - stopPrice);
-            var rewardDistance = Math.Abs(targetPrice - entryPrice);
-            rewardRisk = riskDistance > Symbol.TickSize ? rewardDistance / riskDistance : 0.0;
+            var directionalRiskDistance = direction * (entryPrice - stopPrice);
+            var directionalRewardDistance = direction * (targetPrice - entryPrice);
+            var executionCostReserve = Math.Max(Symbol.Spread, Symbol.TickSize)
+                + SlippageReservePips * Symbol.PipSize;
+
+            // Reject the geometry later if the structural stop is on the wrong side.
+            // R:R is deliberately conservative: reserve spread and configured slippage
+            // from reward, and add the same reserve to risk. Commission cannot be
+            // precisely included here because no prospective position volume is known.
+            rewardRisk = directionalRiskDistance > Symbol.TickSize &&
+                directionalRewardDistance > executionCostReserve
+                ? (directionalRewardDistance - executionCostReserve) /
+                    (directionalRiskDistance + executionCostReserve)
+                : 0.0;
 
             var alignmentIndex = (int)Math.Round(50.0 + 50.0 * sideAlignment);
             var quality = GetSetupQuality(tradeType, signalScore, Symbol.Spread / atrPrice,
@@ -1241,18 +1297,53 @@ namespace CTStopBot
             var labelText = isEntry && highConfidence ? "★ " : string.Empty;
             labelText += string.Format("{0} | {1:F1} pips", title, distancePips);
             var labelOffset = GetGuideLabelOffsetPrice(atrPrice);
+            // ENTRY and TP sit on different sides from SL for each trade direction.
+            // The label's nearest text edge is anchored away from its guide line.
             var labelAbove = (isEntry || isTakeProfit)
                 ? tradeType == TradeType.Buy
                 : tradeType == TradeType.Sell;
+            if (isTakeProfit)
+                labelOffset *= 1.25;
             var labelPrice = displayPrice + (labelAbove ? labelOffset : -labelOffset);
             var label = Chart.DrawText(textName, labelText, endBarIndex, labelPrice, color);
             label.FontSize = 14;
             label.FontFamily = "Segoe UI Light";
             label.IsBold = false;
             label.HorizontalAlignment = HorizontalAlignment.Left;
-            label.VerticalAlignment = VerticalAlignment.Center;
+            label.VerticalAlignment = labelAbove ? VerticalAlignment.Bottom : VerticalAlignment.Top;
 
             _marketGuideContexts[key] = styleKey;
+        }
+
+        private bool IsStopStillOnLossSide(Position position)
+        {
+            var direction = position.TradeType == TradeType.Buy ? 1.0 : -1.0;
+            return direction * (position.EntryPrice - position.StopLoss.Value) > Symbol.TickSize;
+        }
+
+        private bool TryGetCostAdjustedRewardRisk(
+            double entryPrice,
+            double stopPrice,
+            double targetPrice,
+            TradeType tradeType,
+            out double rewardRisk)
+        {
+            rewardRisk = 0.0;
+            if (Symbol.PipSize <= 0 || Symbol.TickSize <= 0 ||
+                !IsFiniteNumber(entryPrice) || !IsFiniteNumber(stopPrice) || !IsFiniteNumber(targetPrice))
+                return false;
+
+            var direction = tradeType == TradeType.Buy ? 1.0 : -1.0;
+            var riskDistance = direction * (entryPrice - stopPrice);
+            var rewardDistance = direction * (targetPrice - entryPrice);
+            var costReserve = Math.Max(Symbol.Spread, Symbol.TickSize)
+                + SlippageReservePips * Symbol.PipSize;
+
+            if (riskDistance <= Symbol.TickSize || rewardDistance <= costReserve)
+                return false;
+
+            rewardRisk = (rewardDistance - costReserve) / (riskDistance + costReserve);
+            return IsFiniteNumber(rewardRisk) && rewardRisk >= MinimumPreTradeRewardRisk;
         }
 
         private double GetCurrentAtrPrice()
@@ -1267,13 +1358,15 @@ namespace CTStopBot
 
         private double GetGuideLabelOffsetPrice(double atrPrice)
         {
-            // A modest price-space gap keeps the 14px label clear of a 1px guide line
-            // without letting labels drift far away in volatile or high-spread markets.
-            var offset = Math.Max(Symbol.TickSize * 6.0, Symbol.PipSize * 3.0);
+            // The text is edge-aligned away from the line, so this is a true visible gap
+            // instead of an anchor displacement partly consumed by half the text height.
+            // The ATR floor scales with chart volatility; tick/pip/spread floors protect
+            // symbols whose ATR or reported spread is unusually small.
+            var offset = Math.Max(Symbol.TickSize * 8.0, Symbol.PipSize * 5.0);
             if (IsFinitePositive(atrPrice))
-                offset = Math.Max(offset, atrPrice * 0.05);
+                offset = Math.Max(offset, atrPrice * 0.08);
             if (IsFinitePositive(Symbol.Spread))
-                offset = Math.Max(offset, Symbol.Spread * 1.5);
+                offset = Math.Max(offset, Symbol.Spread * 2.0);
 
             return offset;
         }
