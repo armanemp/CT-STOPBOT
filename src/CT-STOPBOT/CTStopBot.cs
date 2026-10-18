@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using cAlgo.API;
 using cAlgo.API.Indicators;
 
@@ -25,6 +26,12 @@ namespace CTStopBot
 
         [Parameter("Enable structure trailing", DefaultValue = true)]
         public bool EnableStructureTrailing { get; set; }
+
+        [Parameter("Break-even minimum activation (R)", DefaultValue = 1.25, MinValue = 1.0, MaxValue = 5.0)]
+        public double BreakEvenTriggerR { get; set; }
+
+        [Parameter("Smart trailing minimum activation (R)", DefaultValue = 1.50, MinValue = 1.0, MaxValue = 10.0)]
+        public double TrailingStartR { get; set; }
 
         [Parameter("Manage positions with server-side trailing", DefaultValue = false)]
         public bool ManagePositionsWithServerTrailing { get; set; }
@@ -133,6 +140,8 @@ namespace CTStopBot
         private readonly Dictionary<int, DateTime> _lastAttemptAt = new Dictionary<int, DateTime>();
         private readonly Dictionary<int, DateTime> _lastNoticeAt = new Dictionary<int, DateTime>();
         private readonly Dictionary<int, int> _failureCounts = new Dictionary<int, int>();
+        private readonly Dictionary<int, double> _initialRiskPriceByPosition = new Dictionary<int, double>();
+        private readonly Dictionary<int, bool> _trailingActivatedByPosition = new Dictionary<int, bool>();
         private readonly Dictionary<int, double> _suggestedTpPrices = new Dictionary<int, double>();
         private readonly Dictionary<int, DateTime> _suggestedTpUpdatedAt = new Dictionary<int, DateTime>();
         private readonly Dictionary<int, string> _suggestedTpContexts = new Dictionary<int, string>();
@@ -176,6 +185,7 @@ namespace CTStopBot
             if (Symbol.PipValue <= 0)
                 Print("WARNING: Symbol.PipValue is not positive; cost-aware break-even will be unavailable until the symbol/account metadata provides a valid value.");
 
+            LocalStorage.Reload(LocalStorageScope.Device);
             Chart.RemoveObject("CTSTOPBOT_MARKET_STATUS");
 
             _atr = Indicators.AverageTrueRange(Bars, AtrPeriod, MovingAverageType.Simple);
@@ -193,8 +203,11 @@ namespace CTStopBot
                 SymbolName, TimeFrame, RestrictToLabel ? " only when label matches '" + ManagedLabel + "'" : " regardless of label");
             Print("Symbol diagnostics: Bid={0}, Ask={1}, spread={2:F2} pips, PipSize={3}, TickSize={4}, PipValue={5}; broker min SL distance={6} {7}.",
                 Symbol.Bid, Symbol.Ask, spreadPips, Symbol.PipSize, Symbol.TickSize, Symbol.PipValue, Symbol.MinStopLossDistance, minDistanceUnit);
-            Print("Management switches: initial stop={0}, break-even={1}, structure trailing={2}, manage native trailing positions={3}, label filter={4}.",
-                EnableInitialStopPlacement, EnableBreakEven, EnableStructureTrailing, ManagePositionsWithServerTrailing, RestrictToLabel);
+            Print("Management switches: initial stop={0}, break-even={1} min {2:F2}R + post-entry closed-bar confirmation, structure trailing={3} starts at min {4:F2}R + closed-bar confirmation, native trailing positions={5}, label filter={6}.",
+                EnableInitialStopPlacement, EnableBreakEven, Math.Max(1.25, BreakEvenTriggerR),
+                EnableStructureTrailing, Math.Max(1.50, TrailingStartR),
+                ManagePositionsWithServerTrailing, RestrictToLabel);
+            Print("Original initial R is persisted per account/symbol/position. If it cannot be recovered after an SL has moved to/beyond entry, BE/trailing are blocked instead of guessing.");
             Print("Suggested TP line: enabled={0} (visual only; the cBot never creates or changes a take-profit order).",
                 ShowSuggestedTpLine);
             Print("Pre-trade guidance: enabled={0}; uses closed-candle EMA 9/21/50, RSI, momentum, ATR, spread, and recent market structure. Alignment score is heuristic, not a probability or entry order.",
@@ -247,6 +260,7 @@ namespace CTStopBot
             _lastAttemptAt.Remove(args.Position.Id);
             _lastNoticeAt.Remove(args.Position.Id);
             _failureCounts.Remove(args.Position.Id);
+            RemoveInitialRiskRecord(args.Position);
             RemoveSuggestedTpObjects(args.Position.Id);
             UpdatePreTradeGuidance();
         }
@@ -351,6 +365,14 @@ namespace CTStopBot
             }
 
             var currentStop = position.StopLoss.Value;
+            double initialRiskPrice;
+            var hasInitialRisk = TryGetOrRecoverInitialRisk(position, out initialRiskPrice);
+            if (!hasInitialRisk)
+            {
+                NotifyThrottled(position.Id,
+                    "Original initial risk R is unavailable. BE and smart trailing are blocked rather than guessing an activation threshold.");
+            }
+
             if (!IsSafeRelativeToMarket(currentStop, position.TradeType))
             {
                 NotifyThrottled(position.Id,
@@ -362,9 +384,11 @@ namespace CTStopBot
             var breakEvenUpgrade = false;
             var reason = "structure trailing";
 
-            // Cost-aware break-even estimate. Do not guess if pip value is unavailable.
+            // Require executable live profit plus a fully closed post-entry candle
+            // to confirm the enforced R threshold. The entry candle cannot confirm BE.
             double requiredOffsetPips;
-            if (EnableBreakEven &&
+            if (EnableBreakEven && hasInitialRisk &&
+                HasLiveAndClosedBarRConfirmation(position, initialRiskPrice, Math.Max(1.25, BreakEvenTriggerR)) &&
                 TryGetRequiredBreakEvenOffsetPips(position, out requiredOffsetPips) &&
                 position.Pips >= requiredOffsetPips + BreakEvenTriggerExtraPips)
             {
@@ -384,12 +408,34 @@ namespace CTStopBot
                 }
             }
 
-            // Trail behind recent CLOSED candle structure. Use max for Buy / min
-            // for Sell so trailing cannot loosen a stop or a break-even level.
+            // Activate trailing only after both live >= 1.50R and a post-entry closed
+            // candle confirms it. Persist activation; a later pullback does not erase it.
+            var trailingActivated = false;
+            _trailingActivatedByPosition.TryGetValue(position.Id, out trailingActivated);
+            if (EnableStructureTrailing && hasInitialRisk && !trailingActivated &&
+                HasLiveAndClosedBarRConfirmation(position, initialRiskPrice, Math.Max(1.50, TrailingStartR)))
+            {
+                trailingActivated = true;
+                _trailingActivatedByPosition[position.Id] = true;
+                SaveInitialRiskRecord(position, initialRiskPrice, true);
+                Print("Position {0}: smart trailing ACTIVATED after closed-bar confirmation at >= {1:F2}R; original risk={2}.",
+                    position.Id, Math.Max(1.50, TrailingStartR), initialRiskPrice);
+            }
+
+            var liveFavorableMove = GetExecutableFavorableMovePrice(position);
+            var minimumMaintainProfit = Math.Max(initialRiskPrice * 0.50, Symbol.Spread * 2.0);
+            double requiredTrailingLockPips;
+            var canLockTrailingProfit = hasInitialRisk && trailingActivated &&
+                liveFavorableMove >= minimumMaintainProfit &&
+                TryGetRequiredBreakEvenOffsetPips(position, out requiredTrailingLockPips);
+
+            // After activation, only accept trailing stops that lock the conservative
+            // BE cost estimate; never trail merely because a lower-loss stop is possible.
             double trailingStop;
-            if (EnableStructureTrailing &&
+            if (EnableStructureTrailing && canLockTrailingProfit &&
                 TryCalculateStructuralStop(position, TrailingAtrBuffer, false, out trailingStop) &&
                 IsSafeRelativeToMarket(trailingStop, position.TradeType) &&
+                LocksEstimatedNetProfit(position, trailingStop, requiredTrailingLockPips) &&
                 IsMoreProtective(trailingStop, bestStop, position.TradeType))
             {
                 bestStop = trailingStop;
@@ -1578,6 +1624,211 @@ namespace CTStopBot
             return found;
         }
 
+        private string GetInitialRiskStorageKey(Position position)
+        {
+            var symbolChars = new char[Math.Min(position.SymbolName.Length, 10)];
+            var symbolLength = 0;
+            for (var i = 0; i < position.SymbolName.Length && symbolLength < symbolChars.Length; i++)
+            {
+                var ch = position.SymbolName[i];
+                if (char.IsLetterOrDigit(ch))
+                    symbolChars[symbolLength++] = ch;
+            }
+            var symbolToken = new string(symbolChars, 0, symbolLength);
+            return "CTSBOT RISK " + Account.Number.ToString(CultureInfo.InvariantCulture) +
+                " " + symbolToken + " " + position.Id.ToString(CultureInfo.InvariantCulture);
+        }
+
+        private void SaveInitialRiskRecord(Position position, double riskPrice, bool trailingActivated)
+        {
+            if (position == null || !IsFinitePositive(riskPrice))
+                return;
+
+            _initialRiskPriceByPosition[position.Id] = riskPrice;
+            _trailingActivatedByPosition[position.Id] = trailingActivated;
+
+            try
+            {
+                var value = string.Format(CultureInfo.InvariantCulture, "{0:R}|{1:R}|{2}|{3}",
+                    riskPrice, position.EntryPrice, position.EntryTime.Ticks, trailingActivated ? "1" : "0");
+                LocalStorage.SetString(GetInitialRiskStorageKey(position), value, LocalStorageScope.Device);
+                LocalStorage.Flush(LocalStorageScope.Device);
+            }
+            catch (Exception ex)
+            {
+                Print("WARNING position {0}: original R could not be persisted; restart recovery may be unavailable. {1}",
+                    position.Id, ex.Message);
+            }
+        }
+
+        private void RemoveInitialRiskRecord(Position position)
+        {
+            if (position == null)
+                return;
+            _initialRiskPriceByPosition.Remove(position.Id);
+            _trailingActivatedByPosition.Remove(position.Id);
+
+            try
+            {
+                LocalStorage.Remove(GetInitialRiskStorageKey(position), LocalStorageScope.Device);
+                LocalStorage.Flush(LocalStorageScope.Device);
+            }
+            catch (Exception ex)
+            {
+                Print("WARNING position {0}: persisted original R could not be removed. {1}",
+                    position.Id, ex.Message);
+            }
+        }
+
+        private bool TryGetOrRecoverInitialRisk(Position position, out double riskPrice)
+        {
+            riskPrice = 0.0;
+            if (position == null || Symbol.TickSize <= 0)
+                return false;
+
+            if (_initialRiskPriceByPosition.TryGetValue(position.Id, out riskPrice) &&
+                IsFinitePositive(riskPrice))
+            {
+                if (!_trailingActivatedByPosition.ContainsKey(position.Id))
+                    _trailingActivatedByPosition[position.Id] = false;
+                return true;
+            }
+
+            try
+            {
+                var stored = LocalStorage.GetString(GetInitialRiskStorageKey(position), LocalStorageScope.Device);
+                if (!string.IsNullOrWhiteSpace(stored))
+                {
+                    var parts = stored.Split('|');
+                    double storedRisk;
+                    double storedEntry;
+                    long storedEntryTicks;
+                    if (parts.Length >= 3 &&
+                        double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out storedRisk) &&
+                        double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out storedEntry) &&
+                        long.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out storedEntryTicks) &&
+                        IsFinitePositive(storedRisk) &&
+                        Math.Abs(storedEntry - position.EntryPrice) <= Math.Max(Symbol.TickSize * 0.51, Symbol.PipSize * 0.01) &&
+                        storedEntryTicks == position.EntryTime.Ticks)
+                    {
+                        riskPrice = storedRisk;
+                        _initialRiskPriceByPosition[position.Id] = riskPrice;
+                        _trailingActivatedByPosition[position.Id] = parts.Length >= 4 && parts[3] == "1";
+                        return true;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Print("WARNING position {0}: original R storage read failed; trying conservative recovery from the current SL. {1}",
+                    position.Id, ex.Message);
+            }
+
+            // A loss-side SL can provide a baseline if no persisted record exists. If
+            // SL is at/beyond ENTRY, the original R cannot be reconstructed reliably.
+            if (!position.StopLoss.HasValue)
+                return false;
+
+            var direction = position.TradeType == TradeType.Buy ? 1.0 : -1.0;
+            var recoveredRisk = direction * (position.EntryPrice - position.StopLoss.Value);
+            if (!IsFinitePositive(recoveredRisk) || recoveredRisk <= Symbol.TickSize)
+            {
+                _trailingActivatedByPosition[position.Id] = false;
+                return false;
+            }
+
+            riskPrice = recoveredRisk;
+            SaveInitialRiskRecord(position, riskPrice, false);
+            return true;
+        }
+
+        private double GetExecutableFavorableMovePrice(Position position)
+        {
+            return position.TradeType == TradeType.Buy
+                ? Symbol.Bid - position.EntryPrice
+                : position.EntryPrice - Symbol.Ask;
+        }
+
+        private bool HasPostEntryClosedBarConfirmedMove(Position position, double requiredMovePrice)
+        {
+            if (position == null || Bars.Count < 3 || requiredMovePrice <= 0.0)
+                return false;
+
+            var lastClosedIndex = Bars.Count - 2;
+            var direction = position.TradeType == TradeType.Buy ? 1.0 : -1.0;
+            var requiredClose = position.EntryPrice + direction * requiredMovePrice;
+
+            // Count only completed bars whose open time is after the bar containing entry.
+            for (var i = lastClosedIndex; i >= 0; i--)
+            {
+                if (Bars.OpenTimes[i] <= position.EntryTime)
+                    break;
+
+                var close = Bars.ClosePrices[i];
+                if (position.TradeType == TradeType.Buy && close >= requiredClose)
+                    return true;
+                if (position.TradeType == TradeType.Sell && close <= requiredClose)
+                    return true;
+            }
+            return false;
+        }
+
+        private bool HasLiveAndClosedBarRConfirmation(Position position, double initialRiskPrice, double requiredR)
+        {
+            if (position == null || !IsFinitePositive(initialRiskPrice))
+                return false;
+
+            var requiredMove = initialRiskPrice * Math.Max(requiredR, 1.0);
+            var liveMove = GetExecutableFavorableMovePrice(position);
+            if (!IsFiniteNumber(liveMove) || liveMove < requiredMove)
+                return false;
+
+            return HasPostEntryClosedBarConfirmedMove(position, requiredMove);
+        }
+
+        private bool LocksEstimatedNetProfit(Position position, double stopPrice, double requiredOffsetPips)
+        {
+            if (position == null || Symbol.PipSize <= 0 || !IsFinitePositive(requiredOffsetPips))
+                return false;
+
+            var lockDistance = requiredOffsetPips * Symbol.PipSize;
+            return position.TradeType == TradeType.Buy
+                ? stopPrice >= position.EntryPrice + lockDistance
+                : stopPrice <= position.EntryPrice - lockDistance;
+        }
+
+        private bool TryFindOpenPosition(int positionId, out Position currentPosition)
+        {
+            currentPosition = null;
+            foreach (var candidate in Positions)
+            {
+                if (candidate.Id == positionId)
+                {
+                    currentPosition = candidate;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private bool PositionStopMatches(Position currentPosition, double expectedStop, double? expectedTakeProfit)
+        {
+            if (currentPosition == null || !currentPosition.StopLoss.HasValue)
+                return false;
+
+            var tolerance = Math.Max(Symbol.TickSize * 0.51, Symbol.PipSize * 0.01);
+            if (Math.Abs(currentPosition.StopLoss.Value - expectedStop) > tolerance)
+                return false;
+
+            var actualTakeProfit = currentPosition.TakeProfit;
+            if (actualTakeProfit.HasValue != expectedTakeProfit.HasValue)
+                return false;
+            if (actualTakeProfit.HasValue && Math.Abs(actualTakeProfit.Value - expectedTakeProfit.Value) > tolerance)
+                return false;
+
+            return true;
+        }
+
         private bool TryCalculateStructuralStop(Position position, double atrMultiplier, bool allowFallback, out double stopPrice)
         {
             stopPrice = 0.0;
@@ -1843,9 +2094,27 @@ namespace CTStopBot
 
             if (result.IsSuccessful)
             {
+                Position confirmedPosition;
+                if (!TryFindOpenPosition(position.Id, out confirmedPosition) ||
+                    !PositionStopMatches(confirmedPosition, stopPrice, position.TakeProfit))
+                {
+                    int verificationFailures;
+                    var verificationRetry = RegisterModificationFailure(position.Id, out verificationFailures);
+                    Print("WARNING position {0}: server accepted {1}, but refreshed position state does not yet confirm the requested SL and preserved TP. Verification attempt={2}; retry in {3}s.",
+                        position.Id, reason, verificationFailures, verificationRetry);
+                    return;
+                }
+
                 _failureCounts.Remove(position.Id);
-                Print("Position {0}: {1} accepted at {2}; current Pips={3:F2}, NetProfit={4:F2}, volume={5}.",
-                    position.Id, reason, stopPrice, position.Pips, position.NetProfit, position.VolumeInUnits);
+                if (isInitial && confirmedPosition.StopLoss.HasValue)
+                {
+                    var confirmedRisk = Math.Abs(confirmedPosition.EntryPrice - confirmedPosition.StopLoss.Value);
+                    if (confirmedRisk > Symbol.TickSize)
+                        SaveInitialRiskRecord(confirmedPosition, confirmedRisk, false);
+                }
+                Print("Position {0}: {1} CONFIRMED by refreshed position state at SL={2}; Pips={3:F2}, NetProfit={4:F2}, volume={5}.",
+                    position.Id, reason, confirmedPosition.StopLoss.Value,
+                    confirmedPosition.Pips, confirmedPosition.NetProfit, confirmedPosition.VolumeInUnits);
             }
             else
             {
