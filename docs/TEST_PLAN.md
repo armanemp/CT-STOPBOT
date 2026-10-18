@@ -78,7 +78,6 @@ Do not skip these tests before live use. Record the broker, account type, symbol
 - [ ] Compare the displayed pre-entry SL with the bot-installed initial SL in a manual Buy and Sell; aside from quote changes or the emergency safety fallback, the structural anchor and buffer should match.
 - [ ] Confirm a strong visual highlight requires directional alignment, matching trend/momentum, a safe SL, acceptable spread, no extended momentum, stop distance within the default 2.5 ATR maximum, and R:R at or above the default 1.5 minimum.
 - [ ] Test a nearby confirmed pivot target, no-pivot fallback, and the case where a pivot is too close to current price to be a valid target barrier.
-- [ ] Test a nearby confirmed pivot target, no-pivot fallback, and the case where a pivot is too close to current price to be a valid target barrier.
 - [ ] Verify the lines are chart-only; no position/order is created and no active stop is implied by a proposed line.
 - [ ] During small quote/spread fluctuations, verify proposal lines stay stable; after a meaningful price/structure change, verify they update within the configured threshold/cooldown rules.
 - [ ] Observe the TP proposal being reached; confirm the next forward TP objective is calculated without creating/changing an actual TP order.
@@ -88,7 +87,7 @@ Do not skip these tests before live use. Record the broker, account type, symbol
 - [ ] If the broker rejects the initial SL, confirm the generic SL warning line remains until protection can be observed; labels must remain short and contain only the warning name plus pips.
 - [ ] Open multiple positions on one side; confirm the generic SL proposal is hidden only when all same-side matching positions show SL/native trailing/native BE protection, and each open position retains its own TP line.
 - [ ] Close all positions in one direction; confirm the pre-entry scenario for that side becomes available again.
-- [ ] Disable pre-trade guidance and confirm its lines/panel are removed; verify independent per-position TP behavior follows the TP display toggle.
+- [ ] Disable pre-trade guidance and confirm its lines are removed; verify independent per-position TP behavior follows the TP display toggle.
 
 ## Resilience
 
