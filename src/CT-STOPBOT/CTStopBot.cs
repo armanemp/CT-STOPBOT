@@ -470,7 +470,7 @@ namespace CTStopBot
         {
             if (double.IsNaN(stopPrice) || double.IsInfinity(stopPrice) ||
                 Symbol.PipSize <= 0 || Symbol.TickSize <= 0 ||
-                Symbol.Bid <= 0 || Symbol.Ask <= 0 ||
+                Symbol.Bid <= 0 || Symbol.Ask <= 0 || Symbol.Ask < Symbol.Bid ||
                 double.IsNaN(Symbol.Bid) || double.IsNaN(Symbol.Ask) ||
                 double.IsInfinity(Symbol.Bid) || double.IsInfinity(Symbol.Ask))
                 return false;
@@ -538,8 +538,20 @@ namespace CTStopBot
             // stop trigger method while changing only the absolute stop price.
             // Native server-side break-even positions are skipped above because the
             // pinned Automate API has no compatible overload to preserve that rule.
-            var result = ModifyPosition(position, stopPrice, position.TakeProfit,
-                ProtectionType.Absolute, position.HasTrailingStop, position.StopLossTriggerMethod);
+            TradeResult result;
+            try
+            {
+                result = ModifyPosition(position, stopPrice, position.TakeProfit,
+                    ProtectionType.Absolute, position.HasTrailingStop, position.StopLossTriggerMethod);
+            }
+            catch (Exception ex)
+            {
+                int exceptionFailureCount;
+                var retryInSeconds = RegisterModificationFailure(position.Id, out exceptionFailureCount);
+                Print("WARNING position {0}: ModifyPosition threw an exception: {1}. Candidate={2}; failures={3}; retry delay={4}s.",
+                    position.Id, ex, stopPrice, exceptionFailureCount, retryInSeconds);
+                return;
+            }
 
             if (result.IsSuccessful)
             {
@@ -549,21 +561,27 @@ namespace CTStopBot
             }
             else
             {
-                int previousFailures;
-                _failureCounts.TryGetValue(position.Id, out previousFailures);
-                var failureCount = previousFailures + 1;
-                _failureCounts[position.Id] = failureCount;
-                var exponent = Math.Min(failureCount, 8);
-                var backoff = RetryCooldownSeconds * Math.Pow(2.0, exponent);
-                var retryInSeconds = (int)Math.Min(
-                    Math.Max(RetryCooldownSeconds, MaximumRetryCooldownSeconds), backoff);
-
+                int failureCount;
+                var retryInSeconds = RegisterModificationFailure(position.Id, out failureCount);
                 Print("WARNING position {0}: ModifyPosition failed ({1}). Candidate stop={2}; current stop={3}; Bid={4}; Ask={5}; required market gap={6}. Failure count={7}; retry delay={8}s. Verify broker distance/freeze rules and execution conditions.",
                     position.Id, result.Error, stopPrice,
                     position.StopLoss.HasValue ? position.StopLoss.Value.ToString() : "none",
                     Symbol.Bid, Symbol.Ask, GetRequiredMarketGap(position.TradeType),
                     failureCount, retryInSeconds);
             }
+        }
+
+        private int RegisterModificationFailure(int positionId, out int failureCount)
+        {
+            int previousFailures;
+            _failureCounts.TryGetValue(positionId, out previousFailures);
+            failureCount = previousFailures + 1;
+            _failureCounts[positionId] = failureCount;
+
+            var exponent = Math.Min(failureCount, 8);
+            var backoff = RetryCooldownSeconds * Math.Pow(2.0, exponent);
+            var maximumDelay = Math.Max(RetryCooldownSeconds, MaximumRetryCooldownSeconds);
+            return (int)Math.Min(maximumDelay, backoff);
         }
 
         private void NotifyThrottled(int positionId, string message)
