@@ -70,6 +70,10 @@ Do not skip these tests before live use. Record the broker, account type, symbol
 
 - [ ] Start the cBot with no positions and sufficient M5 history; confirm the BUY and SELL SL/TP proposal lines and condition panel appear.
 - [ ] Confirm the panel reports EMA 9/21/50 trend, three-bar momentum, RSI, ATR regime, spread/ATR quality and an alignment index marked as heuristic rather than probability.
+- [ ] Confirm pre-entry SL prefers the latest confirmed pivot with the configured right/left bar strength, and visibly labels range fallback when no valid pivot can be used.
+- [ ] Compare the displayed pre-entry SL with the bot-installed initial SL in a manual Buy and Sell; aside from quote changes or the emergency safety fallback, the structural anchor and buffer should match.
+- [ ] Verify scenarios are marked WAIT when the stop is invalid, wider than the configured maximum ATR distance (default 2.5 ATR), R:R is below the configured minimum (default 1.5), spread/ATR is too high, or trend and momentum both oppose the side.
+- [ ] Test a nearby confirmed pivot target, no-pivot fallback, and the case where a pivot is too close to current price to be a valid target barrier.
 - [ ] Verify the lines are chart-only; no position/order is created and no active stop is implied by a proposed line.
 - [ ] During small quote/spread fluctuations, verify proposal lines stay stable; after a meaningful price/structure change, verify they update within the configured threshold/cooldown rules.
 - [ ] Observe the TP proposal being reached; confirm the next forward TP objective is calculated without creating/changing an actual TP order.
