@@ -89,8 +89,12 @@ namespace CTStopBot
             Positions.Opened += OnPositionOpened;
             Positions.Closed += OnPositionClosed;
 
+            var minDistanceUnit = Symbol.MinDistanceType == SymbolMinDistanceType.Pips ? "pips" : "percent";
+            var spreadPips = Symbol.PipSize > 0 ? Symbol.Spread / Symbol.PipSize : 0.0;
             Print("CT-STOPBOT started on {0} {1}. Positions matching this symbol will be managed{2}.",
                 SymbolName, TimeFrame, RestrictToLabel ? " only when label matches '" + ManagedLabel + "'" : " regardless of label");
+            Print("Symbol diagnostics: Bid={0}, Ask={1}, spread={2:F2} pips, PipSize={3}, TickSize={4}, PipValue={5}; broker min SL distance={6} {7}.",
+                Symbol.Bid, Symbol.Ask, spreadPips, Symbol.PipSize, Symbol.TickSize, Symbol.PipValue, Symbol.MinStopLossDistance, minDistanceUnit);
 
             // Protect eligible positions that were already open when the cBot started.
             foreach (var position in Positions)
@@ -271,7 +275,7 @@ namespace CTStopBot
                 NotifyThrottled(position.Id,
                     "Structural stop is already at/beyond the safe market gap; trying a fallback stop beyond the current quote. Review the position immediately because its structural level may have been invalidated.");
 
-                var fallbackGap = Math.Max(Symbol.TickSize, Math.Max(MinimumMarketGapPips * Symbol.PipSize, buffer));
+                var fallbackGap = Math.Max(GetRequiredMarketGap(position.TradeType), buffer);
                 rawPrice = position.TradeType == TradeType.Buy
                     ? Math.Min(rawPrice, Symbol.Bid - fallbackGap)
                     : Math.Max(rawPrice, Symbol.Ask + fallbackGap);
@@ -289,16 +293,21 @@ namespace CTStopBot
             if (Symbol.PipSize <= 0 || Symbol.LotSize <= 0 || Symbol.PipValue <= 0)
                 return false;
 
-            // Position.Commissions is documented as commission associated with the
-            // trade request (one way). Estimate round trip and permit an extra reserve.
-            // Symbol.PipValue is used with volume in units in cTrader's official risk examples.
+            // cTrader's Symbol.PipValue is used with volume in units in its risk examples.
+            // It is fixed when the cBot starts, so account-currency conversion can drift over time.
             var pipValueForPosition = Symbol.PipValue * position.VolumeInUnits;
             if (pipValueForPosition <= 0 || double.IsNaN(pipValueForPosition) ||
                 double.IsInfinity(pipValueForPosition))
                 return false;
 
+            // Position.Commissions is the one-way commission for opening the position.
+            // The multiplier estimates the round trip. Count already-accrued negative
+            // swap as a cost; do not rely on future swap being predictable.
+            var accruedNegativeSwapCash = Math.Max(0.0, -position.Swap);
             var estimatedCommissionCash =
-                Math.Abs(position.Commissions) * RoundTripCommissionMultiplier + AdditionalCostReserve;
+                Math.Abs(position.Commissions) * RoundTripCommissionMultiplier
+                + accruedNegativeSwapCash
+                + AdditionalCostReserve;
 
             var commissionPips = estimatedCommissionCash / pipValueForPosition;
             var spreadPips = (Symbol.Spread / Symbol.PipSize) * BreakEvenSpreadMultiplier;
@@ -321,9 +330,35 @@ namespace CTStopBot
             return Math.Round(normalized, Symbol.Digits, MidpointRounding.AwayFromZero);
         }
 
-        private bool IsSafeRelativeToMarket(double stopPrice, TradeType tradeType)
+        private double GetRequiredMarketGap(TradeType tradeType)
         {
             var minimumGap = Math.Max(Symbol.TickSize, MinimumMarketGapPips * Symbol.PipSize);
+            var brokerDistance = Symbol.MinStopLossDistance;
+
+            if (double.IsNaN(brokerDistance) || double.IsInfinity(brokerDistance) || brokerDistance <= 0)
+                return minimumGap;
+
+            if (Symbol.MinDistanceType == SymbolMinDistanceType.Pips)
+            {
+                brokerDistance *= Symbol.PipSize;
+            }
+            else
+            {
+                // cTrader expresses percentage-based minimum distances as a percentage
+                // of the current market price. Use the close-side quote for this trade.
+                var referencePrice = tradeType == TradeType.Buy ? Symbol.Bid : Symbol.Ask;
+                brokerDistance = referencePrice * brokerDistance / 100.0;
+            }
+
+            if (!double.IsNaN(brokerDistance) && !double.IsInfinity(brokerDistance) && brokerDistance > 0)
+                minimumGap = Math.Max(minimumGap, brokerDistance);
+
+            return minimumGap;
+        }
+
+        private bool IsSafeRelativeToMarket(double stopPrice, TradeType tradeType)
+        {
+            var minimumGap = GetRequiredMarketGap(tradeType);
 
             if (tradeType == TradeType.Buy)
                 return stopPrice < Symbol.Bid - minimumGap;
