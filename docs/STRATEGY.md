@@ -15,7 +15,7 @@ By default it manages all position labels on that symbol, including manual posit
    - current spread × spread-buffer multiplier,
    - the minimum wick buffer in pips.
 4. Round away from the market using the symbol tick size.
-5. Do not submit the level if it is already too close to or beyond the current close-side quote. If the broker rejects an update, log the error and retry after a cooldown.
+5. If the structural level is too close to or already through the current close-side quote, log a warning and calculate a fallback beyond the current quote. This may signal a broken swing; inspect the position immediately. If the broker rejects the update, log the error and retry after a cooldown.
 
 An existing stop is preserved; the cBot does not widen it. If the structural candidate is already too close to or through the current quote, the bot logs a warning and calculates a fallback beyond the current quote. This can indicate that the structural level has already been invalidated; inspect the position promptly and verify any fallback/rejection in the logs. This is a simple structural baseline and needs demo observation to tune to the broker's Gold feed.
 
