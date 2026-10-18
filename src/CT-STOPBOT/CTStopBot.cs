@@ -627,7 +627,9 @@ namespace CTStopBot
 
             var target = position.EntryPrice + direction * projectedDistance;
             var extendedAfterTarget = false;
-            if (direction * (target - referencePrice) <= minimumTargetDistance)
+            // Advance to the next objective only after the current TP is actually reached
+            // or passed. Do not move the target away merely because price is approaching it.
+            if (direction * (target - referencePrice) <= 0.0)
             {
                 target = referencePrice + direction * projectedDistance;
                 extendedAfterTarget = true;
