@@ -242,6 +242,12 @@ namespace CTStopBot
             }
 
             var currentStop = position.StopLoss.Value;
+            if (!IsSafeRelativeToMarket(currentStop, position.TradeType))
+            {
+                NotifyThrottled(position.Id,
+                    "Existing stop is currently inside the configured/broker market gap or has been crossed. CT-STOPBOT will not widen it; inspect the live position and broker rules.");
+            }
+
             var bestStop = currentStop;
             var hasBetterStop = false;
             var breakEvenUpgrade = false;
