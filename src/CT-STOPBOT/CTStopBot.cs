@@ -143,9 +143,6 @@ namespace CTStopBot
         private readonly Dictionary<string, string> _marketGuideContexts = new Dictionary<string, string>();
         private const int GuideLineBarsLeft = 20;
         private const int GuideLineBarsRight = 40;
-        private DateTime _lastFutureSpaceBarTime = DateTime.MinValue;
-        private bool _futureSpaceInitialized;
-
         protected override void OnStart()
         {
             if (TimeFrame != cAlgo.API.TimeFrame.Minute5)
@@ -203,7 +200,6 @@ namespace CTStopBot
                 ManagePosition(position);
 
             UpdatePreTradeGuidance();
-            KeepGuideLabelsToRight();
 
             // Timer retries failed/missing initial protection even during quiet ticks.
             Timer.Start(1);
@@ -216,9 +212,8 @@ namespace CTStopBot
 
         protected override void OnTimer()
         {
+            // Refresh guidance and manage stops without altering the user's chart viewport.
             ManageAllPositions();
-            UpdatePreTradeGuidance();
-            KeepGuideLabelsToRight();
         }
 
         protected override void OnStop()
@@ -616,13 +611,13 @@ namespace CTStopBot
 
         private void DrawSuggestedTpObjects(Position position, double targetPrice, string context)
         {
-            var currentBarTime = Bars.OpenTimes[Bars.Count - 1];
-            var startTime = GetGuideLineStartTime(currentBarTime);
-            var endTime = currentBarTime.AddMinutes(GuideLineBarsRight * 5.0);
+            var currentBarIndex = Bars.Count - 1;
+            var startBarIndex = Math.Max(0, currentBarIndex - GuideLineBarsLeft);
+            var endBarIndex = currentBarIndex + GuideLineBarsRight;
             var color = Color.FromHex("#438D7F");
             var lineName = GetSuggestedTpLineName(position.Id);
             var textName = GetSuggestedTpTextName(position.Id);
-            var line = Chart.DrawTrendLine(lineName, startTime, targetPrice, endTime, targetPrice,
+            var line = Chart.DrawTrendLine(lineName, startBarIndex, targetPrice, endBarIndex, targetPrice,
                 color, 1, LineStyle.Solid);
             line.ExtendToInfinity = false;
 
@@ -633,7 +628,7 @@ namespace CTStopBot
                 : targetPrice - labelOffset;
             var label = Chart.DrawText(textName,
                 string.Format("TP | {0:F1} pips", distancePips),
-                endTime, labelPrice, color);
+                endBarIndex, labelPrice, color);
             label.FontSize = 14;
             label.FontFamily = "Segoe UI Light";
             label.IsBold = false;
@@ -1221,17 +1216,18 @@ namespace CTStopBot
                 !string.Equals(previousStyle, styleKey, StringComparison.Ordinal);
 
             var currentBarTime = Bars.OpenTimes[Bars.Count - 1];
-            var startTime = GetGuideLineStartTime(currentBarTime);
+            var currentBarIndex = Bars.Count - 1;
+            var startBarIndex = Math.Max(0, currentBarIndex - GuideLineBarsLeft);
+            var endBarIndex = currentBarIndex + GuideLineBarsRight;
             DateTime lastStartTime;
             var newBar = !_marketGuideStartTimes.TryGetValue(key, out lastStartTime) || lastStartTime != currentBarTime;
-            var endTime = currentBarTime.AddMinutes(GuideLineBarsRight * 5.0);
             var lineName = GetMarketGuideLineName(key);
             var textName = GetMarketGuideTextName(key);
 
             if (!hasPrevious || priceChanged || styleChanged || levelReached || newBar)
             {
                 var style = isEntry && !highConfidence ? LineStyle.Dots : LineStyle.Solid;
-                var line = Chart.DrawTrendLine(lineName, startTime, displayPrice, endTime, displayPrice,
+                var line = Chart.DrawTrendLine(lineName, startBarIndex, displayPrice, endBarIndex, displayPrice,
                     color, 1, style);
                 line.ExtendToInfinity = false;
                 _marketGuidePrices[key] = displayPrice;
@@ -1249,7 +1245,7 @@ namespace CTStopBot
                 ? tradeType == TradeType.Buy
                 : tradeType == TradeType.Sell;
             var labelPrice = displayPrice + (labelAbove ? labelOffset : -labelOffset);
-            var label = Chart.DrawText(textName, labelText, endTime, labelPrice, color);
+            var label = Chart.DrawText(textName, labelText, endBarIndex, labelPrice, color);
             label.FontSize = 14;
             label.FontFamily = "Segoe UI Light";
             label.IsBold = false;
@@ -1257,14 +1253,6 @@ namespace CTStopBot
             label.VerticalAlignment = VerticalAlignment.Center;
 
             _marketGuideContexts[key] = styleKey;
-        }
-
-        private DateTime GetGuideLineStartTime(DateTime currentBarTime)
-        {
-            var startIndex = Bars.Count - 1 - GuideLineBarsLeft;
-            return startIndex >= 0
-                ? Bars.OpenTimes[startIndex]
-                : currentBarTime.AddMinutes(-GuideLineBarsLeft * 5.0);
         }
 
         private double GetCurrentAtrPrice()
@@ -1286,29 +1274,6 @@ namespace CTStopBot
                 offset = Math.Max(offset, Symbol.Spread * 1.25);
 
             return offset;
-        }
-
-        private void KeepGuideLabelsToRight()
-        {
-            if (Bars.Count < 2)
-                return;
-
-            var currentBarTime = Bars.OpenTimes[Bars.Count - 1];
-            if (!_futureSpaceInitialized)
-            {
-                // Scroll into the future so the +40-bar line endpoint and labels remain visible.
-                Chart.ScrollXBy(GuideLineBarsRight);
-                _futureSpaceInitialized = true;
-                _lastFutureSpaceBarTime = currentBarTime;
-                return;
-            }
-
-            // Track new candles so the +40-bar endpoint stays in view.
-            if (currentBarTime != _lastFutureSpaceBarTime)
-            {
-                Chart.ScrollXBy(1);
-                _lastFutureSpaceBarTime = currentBarTime;
-            }
         }
 
         private string GetMarketGuideLineName(string key)
