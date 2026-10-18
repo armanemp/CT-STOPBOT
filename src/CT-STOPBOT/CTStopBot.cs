@@ -262,6 +262,23 @@ namespace CTStopBot
                 : swingHigh + buffer;
 
             stopPrice = NormalizeStopPrice(rawPrice, position.TradeType);
+
+            if (!IsSafeRelativeToMarket(stopPrice, position.TradeType))
+            {
+                // The original swing stop may already have been crossed or may be
+                // too close to market to submit. Use an explicitly warned fallback
+                // beyond the current quote so the position is not silently ignored.
+                NotifyThrottled(position.Id,
+                    "Structural stop is already at/beyond the safe market gap; trying a fallback stop beyond the current quote. Review the position immediately because its structural level may have been invalidated.");
+
+                var fallbackGap = Math.Max(Symbol.TickSize, Math.Max(MinimumMarketGapPips * Symbol.PipSize, buffer));
+                rawPrice = position.TradeType == TradeType.Buy
+                    ? Math.Min(rawPrice, Symbol.Bid - fallbackGap)
+                    : Math.Max(rawPrice, Symbol.Ask + fallbackGap);
+
+                stopPrice = NormalizeStopPrice(rawPrice, position.TradeType);
+            }
+
             return IsSafeRelativeToMarket(stopPrice, position.TradeType);
         }
 
@@ -274,7 +291,8 @@ namespace CTStopBot
 
             // Position.Commissions is documented as commission associated with the
             // trade request (one way). Estimate round trip and permit an extra reserve.
-            var pipValueForPosition = Symbol.PipValue * (position.VolumeInUnits / Symbol.LotSize);
+            // Symbol.PipValue is used with volume in units in cTrader's official risk examples.
+            var pipValueForPosition = Symbol.PipValue * position.VolumeInUnits;
             if (pipValueForPosition <= 0 || double.IsNaN(pipValueForPosition) ||
                 double.IsInfinity(pipValueForPosition))
                 return false;
