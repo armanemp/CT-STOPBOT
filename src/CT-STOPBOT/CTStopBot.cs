@@ -530,9 +530,13 @@ namespace CTStopBot
             // Cap a farther ATR projection at the nearest relevant recent resistance/support,
             // with a small buffer before that level. Ignore levels that are too close to price.
             var firstIndex = lastClosedIndex - TpStructureLookback + 1;
-            var nearestLevel = position.TradeType == TradeType.Buy ? double.MaxValue : double.MinValue;
-            var foundLevel = false;
-            for (var i = firstIndex; i <= lastClosedIndex; i++)
+            double nearestLevel;
+            var foundLevel = TryFindNearestTargetPivot(
+                position.TradeType, lastClosedIndex, TpStructureLookback,
+                referencePrice, minimumTargetDistance, out nearestLevel);
+            if (!foundLevel)
+                nearestLevel = position.TradeType == TradeType.Buy ? double.MaxValue : double.MinValue;
+            for (var i = firstIndex; !foundLevel && i <= lastClosedIndex; i++)
             {
                 if (position.TradeType == TradeType.Buy)
                 {
