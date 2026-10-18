@@ -24,7 +24,7 @@ Do not skip these tests before live use. Record the broker, account type, symbol
 - [ ] Open a position while the market is moving quickly; confirm rejected/unsafe candidates are logged and the bot retries.
 - [ ] Start the cBot while an eligible position is already open without a stop; confirm it attempts protection.
 - [ ] Confirm the candidate is beyond the selected closed-candle swing and rounded to tick size.
-- [ ] With insufficient chart history, confirm the bot waits for both full swing lookback and ATR warm-up instead of using partial history.
+- [ ] With insufficient chart history, confirm the structural calculator does not use partial bars. If a naked position has no SL, confirm the bot attempts a visibly logged emergency loss-side/broker-gap SL, or reports why no safe emergency level can be placed.
 - [ ] Force repeated stop modification rejections and confirm retry delays start at the configured cooldown and then increase up to the configured maximum.
 - [ ] Confirm stop placement respects the broker-reported minimum stop-loss distance when distance units are pips.
 - [ ] If the broker reports percentage-based minimum distance, confirm the diagnostic log displays the units and candidate stops respect the percentage-derived gap.
@@ -62,14 +62,14 @@ Do not skip these tests before live use. Record the broker, account type, symbol
 - [ ] Record the actual `Position.TakeProfit` before and after cBot operation; confirm this feature never submits or changes it.
 - [ ] Watch small tick fluctuations and confirm the line does not move unless the ATR/pip threshold is met.
 - [ ] Confirm trend/momentum context changes can update the label without forcing a price jump.
-- [ ] Let price reach/pass the suggested target; confirm the next forward suggestion is recalculated promptly.
+- [ ] Approach the suggested TP without reaching it and confirm the line does not jump away; only once the old target is reached/passed should the next ATR objective be calculated.
 - [ ] Confirm the nearest valid historical resistance/support can cap the ATR target, and inspect both trend-aligned and countertrend cases.
 - [ ] Disable the suggested TP line; confirm the drawings are removed and no TP order is changed.
 - [ ] Close a position and stop the cBot; confirm the corresponding drawings are removed.
 
 ## Pre-entry guidance and position handover
 
-- [ ] Start with no positions and sufficient M5 history; confirm only side(s) meeting every strict quality criterion draw ENTRY, SL and TP guide lines. Unqualified sides must not leave muted, low-quality pseudo-signals.
+- [ ] Start with no positions and sufficient M5 history; confirm calculated ENTRY/SL/TP guides remain visible for both directions when structural values exist. A side that fails any strict quality floor must use dotted provisional lines, `SL!`/`TP!` warning labels, and an explicit status reason—not a false qualified signal.
 - [ ] On qualified and unqualified setups, confirm ENTRY/SL/TP match their own line price and use thickness 1. Unqualified calculations should remain visible as dotted/provisional guides instead of disappearing.
 - [ ] Confirm no verbose static market panel remains, and each line label contains only its short name plus distance in pips; no entry, TP or SL price number and no per-position ID appears.
 - [ ] Confirm the chart viewport does not jump on cBot start or reload, and lines span from 20 actual bar indices before the active candle to 20 after it.
@@ -78,7 +78,7 @@ Do not skip these tests before live use. Record the broker, account type, symbol
 - [ ] Confirm every guide line has thickness 1; a qualified ENTRY is gold with a star, and unqualified/invalid levels are dotted with a concise `SL!` or `TP!` label/status reason.
 - [ ] Confirm ENTRY is a conditional breakout level at a confirmed swing high/low with an ATR/spread buffer, not simply the current Ask/Bid.
 - [ ] Confirm pre-entry SL prefers the latest confirmed pivot with the configured strength, with a range-extreme fallback when no safe confirmed pivot can be used.
-- [ ] Compare the displayed pre-entry SL with the bot-installed initial SL in a manual Buy and Sell; aside from quote changes or the emergency safety fallback, the structural anchor and buffer should match.
+- [ ] Compare the displayed pre-entry SL with the bot-installed initial SL in a manual Buy and Sell; aside from quote changes, emergency safety fallback, or the minimum entry-loss-side guard, the structural anchor and buffer should match.
 - [ ] Confirm the displayed geometry—not only unsmoothed candidate values—is rechecked for stop side/safety, 0.25–2.25 ATR risk distance, net R:R ≥ 1.8, spread/ATR ≤ 0.16, alignment ≥ 0.65, no extended momentum, and closed-candle trend/momentum confirmation. When a nearby opposing structure prevents 1.8R, TP stays before it, is marked `TP!`, and the side status shows the low ratio; it must not project through the structure to fake qualification.
 - [ ] Test a nearby confirmed pivot target, no-pivot fallback, and the case where a pivot is too close to current price to be a valid target barrier.
 - [ ] Verify the lines are chart-only; no position/order is created and no active stop is implied by a proposed line.
