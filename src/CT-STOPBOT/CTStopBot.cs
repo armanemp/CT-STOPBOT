@@ -637,6 +637,11 @@ namespace CTStopBot
             // profitable objective from entry: ignore barriers already behind entry.
             // Once the position is in profit, evaluate the next barrier from the live
             // executable quote so a reached target can extend to the next objective.
+            // Always inspect the nearest opposing closed-candle structure, including
+            // barriers close to the projected target. While price remains on the loss side,
+            // use ENTRY as the reference so structures already behind entry cannot turn a
+            // profit target into a loss-level objective. Once price is in profit, use the
+            // executable quote to find the next barrier for a reached/extended target.
             var structureReferencePrice =
                 direction * (referencePrice - position.EntryPrice) > Symbol.TickSize * 0.5
                     ? referencePrice
