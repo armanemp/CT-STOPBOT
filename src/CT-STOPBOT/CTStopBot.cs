@@ -721,8 +721,12 @@ namespace CTStopBot
                 var structureBuffer = Math.Max(Symbol.TickSize * 2.0,
                     Math.Max(Symbol.Spread, atrPrice * 0.05));
                 double cappedTarget;
+                // Outward profit-side rounding can move a candidate across a barrier
+                // even when its unrounded price was technically before that barrier.
+                // Check the rounded candidate too, then round any cap safely inward.
+                var targetForBarrierCheck = NormalizeSuggestedTpPrice(target, position.TradeType);
                 if (RiskRewardEngine.TryCapTargetBeforeBarrier(
-                    structureReferencePrice, target, nearestLevel, structureBuffer,
+                    structureReferencePrice, targetForBarrierCheck, nearestLevel, structureBuffer,
                     structureSearchDistance, directionSign, out cappedTarget))
                 {
                     target = cappedTarget;
@@ -1446,8 +1450,11 @@ namespace CTStopBot
                 // that barrier and reject the setup by its resulting R:R below. Do not
                 // ignore resistance/support to manufacture a bigger reward distance.
                 double cappedTarget;
+                // Check the outward-normalized target against structure as well: a
+                // fractional-tick candidate can round through a nearby barrier otherwise.
+                var targetForBarrierCheck = NormalizeSuggestedTpPrice(target, tradeType);
                 if (RiskRewardEngine.TryCapTargetBeforeBarrier(
-                    entryPrice, target, nearestLevel, structureBuffer,
+                    entryPrice, targetForBarrierCheck, nearestLevel, structureBuffer,
                     structureSearchDistance, direction > 0.0 ? 1 : -1, out cappedTarget))
                 {
                     target = cappedTarget;
