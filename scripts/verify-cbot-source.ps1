@@ -25,7 +25,7 @@ $checks = @(
     @{ Name = "emergency initial stop is loss-side"; Pattern = 'return direction \* \(position\.EntryPrice - stopPrice\) > Symbol\.TickSize;' },
     @{ Name = "TP label remains concise"; Pattern = '"{0} \| \{1:F1\} pips"' },
     @{ Name = "TP quality lives in status summary"; Pattern = 'GetOpenPositionTpQualitySummary\(' },
-    @{ Name = "next TP extends only after current target is reached"; Pattern = 'Do not move the target away merely because price is approaching it\.' }
+    @{ Name = "next TP extends only after current target is reached"; Pattern = 'Do not move the target away merely because price is approaching it\.' },
     @{ Name = "TP structure refresh overrides smoothing"; Pattern = 'newBar && structureIsCurrentlyCappingTarget' },
     @{ Name = "TP structure refresh overrides cooldown"; Pattern = 'if \(cooldownActive && !mustAdoptCandidate\)' },
     @{ Name = "position TP caps the outward-rounded target"; Pattern = 'targetForBarrierCheck = NormalizeSuggestedTpPrice\(target, position\.TradeType\)' },
