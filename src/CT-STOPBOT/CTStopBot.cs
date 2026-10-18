@@ -798,7 +798,7 @@ namespace CTStopBot
             // Keep each line label minimal. Risk/reward quality is shown in the static
             // status summary, not squeezed into or placed on top of the horizontal guide.
             double originalRisk;
-            double netRewardRisk;
+            double netRewardRisk = 0.0;
             double costReserve;
             var hasOriginalRisk = _initialRiskPriceByPosition.TryGetValue(position.Id, out originalRisk) &&
                 IsFinitePositive(originalRisk);
