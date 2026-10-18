@@ -534,9 +534,10 @@ namespace CTStopBot
             var foundLevel = TryFindNearestTargetPivot(
                 position.TradeType, lastClosedIndex, TpStructureLookback,
                 referencePrice, minimumTargetDistance, out nearestLevel);
+            var usedConfirmedPivot = foundLevel;
             if (!foundLevel)
                 nearestLevel = position.TradeType == TradeType.Buy ? double.MaxValue : double.MinValue;
-            for (var i = firstIndex; !foundLevel && i <= lastClosedIndex; i++)
+            for (var i = firstIndex; !usedConfirmedPivot && i <= lastClosedIndex; i++)
             {
                 if (position.TradeType == TradeType.Buy)
                 {
