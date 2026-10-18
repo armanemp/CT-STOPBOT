@@ -1070,6 +1070,15 @@ namespace CTStopBot
             var alignmentIndex = (int)Math.Round(50.0 + 50.0 * sideAlignment);
             var quality = GetSetupQuality(tradeType, signalScore, Symbol.Spread / atrPrice,
                 overextended);
+            if (!stopIsSafe)
+                quality = "WAIT — SL invalid at current quote/broker gap";
+            else if (stopDistanceAtr > MaximumPreTradeStopDistanceAtr)
+                quality = "WAIT — structural SL too wide";
+            else if (rewardRisk < MinimumPreTradeRewardRisk)
+                quality = "WAIT — reward/risk below filter";
+            else if ((tradeType == TradeType.Buy && trendText == "BEARISH" && momentumText == "DOWN") ||
+                     (tradeType == TradeType.Sell && trendText == "BULLISH" && momentumText == "UP"))
+                quality = "WAIT — trend and momentum oppose this side";
             setupContext = string.Format("align {0}/100 | {1} | {2} | R:R {3:F2} | {4}",
                 alignmentIndex,
                 sideAlignment >= 0.35 ? "trend aligned" : sideAlignment <= -0.35 ? "countertrend" : "mixed",
