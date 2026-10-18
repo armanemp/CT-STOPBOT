@@ -239,7 +239,7 @@ namespace CTStopBot
                 EnableInitialStopPlacement, EnableBreakEven, Math.Max(1.25, BreakEvenTriggerR),
                 EnableStructureTrailing, Math.Max(1.50, TrailingStartR),
                 ManagePositionsWithServerTrailing, RestrictToLabel);
-            Print("Original initial R is persisted per account/symbol/position. If it cannot be recovered after an SL has moved to/beyond entry, BE/trailing are blocked instead of guessing.");
+            Print("Initial R baseline is persisted per account/symbol/position. If no record exists, a loss-side SL is adopted as the baseline on first observation; this cannot prove it was the historical initial SL. If SL is at/beyond entry and no record exists, BE/trailing remain blocked rather than guessing.");
             Print("Suggested TP line: enabled={0} (visual only; the cBot never creates or changes a take-profit order).",
                 ShowSuggestedTpLine);
             Print("Pre-trade guidance: enabled={0}; uses closed-candle EMA 9/21/50, RSI, momentum, ATR, spread, and recent market structure. Alignment score is heuristic, not a probability or entry order.",
@@ -1875,8 +1875,10 @@ namespace CTStopBot
                     position.Id, ex.Message);
             }
 
-            // A loss-side SL can provide a baseline if no persisted record exists. If
-            // SL is at/beyond ENTRY, the original R cannot be reconstructed reliably.
+            // A loss-side SL can provide an adoption baseline if no persisted record
+            // exists, but it cannot prove the SL has never been manually tightened.
+            // This baseline is persisted from this point forward. If SL is at/beyond
+            // ENTRY, the previous loss-side R cannot be reconstructed reliably.
             if (!position.StopLoss.HasValue)
                 return false;
 
@@ -1890,6 +1892,8 @@ namespace CTStopBot
 
             riskPrice = recoveredRisk;
             SaveInitialRiskRecord(position, riskPrice, false);
+            Print("INFO position {0}: no persisted R record existed; adopting the current loss-side SL as the management R baseline ({1:F5} price units). If this SL had already been tightened manually before CT-STOPBOT started, the historical initial R is unknowable; subsequent BE/trailing uses this saved baseline.",
+                position.Id, riskPrice);
             return true;
         }
 
