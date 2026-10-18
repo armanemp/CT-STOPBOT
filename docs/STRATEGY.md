@@ -16,7 +16,8 @@ By default it manages all position labels on that symbol, including manual posit
    - the minimum wick buffer in pips.
 4. Round away from the market using the symbol tick size.
 5. Enforce the larger of the configured market gap and the broker-reported minimum stop-loss distance. cTrader may express the broker distance in pips or as a percentage of price.
-6. If the structural level is too close to or already through the current close-side quote, log a warning and calculate a fallback beyond the current quote. This may signal a broken swing; inspect the position immediately. If the broker rejects the update, log the error and retry after a cooldown.
+6. If the initial structural level is too close to or already through the current close-side quote, log a warning and calculate a fallback beyond the current quote. This may signal a broken swing; inspect the position immediately.
+7. If a *trailing* structural candidate is too close to or through the current quote, skip that trailing update rather than snapping an already-protected stop close to market.
 
 An existing stop is preserved; the cBot does not widen it. The broker-reported minimum distance reduces avoidable rejections, but it may not capture every dynamic freeze rule or execution constraint, so broker rejections still need to be tested.
 
@@ -69,3 +70,8 @@ One stop modification is attempted per position at a time. Failed changes are lo
 - Position modifications preserve take-profit, the server-side trailing flag, and the existing stop trigger method.
 - The final selected trailing candidate must still meet the trailing-step threshold; a break-even candidate does not accidentally waive that threshold if structural trailing supersedes it.
 - Minimum round-trip commission reserve can account for broker minimum commissions when the observed opening commission is zero or unusually small.
+
+
+## Price-data guards and close events
+
+The cBot refuses unsafe candidate prices when they are NaN/infinite, or when Bid/Ask/PipSize/TickSize are invalid. It logs the position close reason and removes its per-position retry/notice state when the position closes.
