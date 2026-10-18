@@ -142,6 +142,8 @@ namespace CTStopBot
         private readonly Dictionary<string, DateTime> _marketGuideStartTimes = new Dictionary<string, DateTime>();
         private readonly Dictionary<string, string> _marketGuideContexts = new Dictionary<string, string>();
         private const int GuideLabelOffsetBars = 40;
+        private DateTime _lastFutureSpaceBarTime = DateTime.MinValue;
+        private bool _futureSpaceInitialized;
 
         protected override void OnStart()
         {
@@ -200,6 +202,7 @@ namespace CTStopBot
                 ManagePosition(position);
 
             UpdatePreTradeGuidance();
+            KeepGuideLabelsToRight();
 
             // Timer retries failed/missing initial protection even during quiet ticks.
             Timer.Start(1);
@@ -214,6 +217,7 @@ namespace CTStopBot
         {
             ManageAllPositions();
             UpdatePreTradeGuidance();
+            KeepGuideLabelsToRight();
         }
 
         protected override void OnStop()
@@ -616,12 +620,11 @@ namespace CTStopBot
             var color = Color.FromHex("#438D7F");
             var lineName = GetSuggestedTpLineName(position.Id);
             var textName = GetSuggestedTpTextName(position.Id);
-            var line = Chart.DrawTrendLine(lineName, startTime, targetPrice, endTime, targetPrice, color, 2, LineStyle.Solid);
-            line.ExtendToInfinity = false;
+            var line = Chart.DrawHorizontalLine(lineName, targetPrice, color, 2, LineStyle.Solid);
 
             var distancePips = Symbol.PipSize > 0 ? Math.Abs(targetPrice - position.EntryPrice) / Symbol.PipSize : 0.0;
             var label = Chart.DrawText(textName,
-                string.Format("TP #{0} | {1:F1} pips", position.Id, distancePips),
+                string.Format("TP | {0:F1} pips", distancePips),
                 endTime, targetPrice, color);
             label.FontSize = 14;
             label.FontFamily = "Segoe UI Light";
@@ -1220,9 +1223,7 @@ namespace CTStopBot
             {
                 var thickness = highConfidence ? 3 : 2;
                 var style = isEntry && !highConfidence ? LineStyle.Dots : LineStyle.Solid;
-                var line = Chart.DrawTrendLine(lineName, startTime, displayPrice,
-                    endTime, displayPrice, color, thickness, style);
-                line.ExtendToInfinity = false;
+                var line = Chart.DrawHorizontalLine(lineName, displayPrice, color, thickness, style);
                 _marketGuidePrices[key] = displayPrice;
                 _marketGuideUpdatedAt[key] = Server.Time;
                 _marketGuideStartTimes[key] = startTime;
@@ -1241,6 +1242,30 @@ namespace CTStopBot
             label.VerticalAlignment = VerticalAlignment.Center;
 
             _marketGuideContexts[key] = styleKey;
+        }
+
+        private void KeepGuideLabelsToRight()
+        {
+            if (Bars.Count < 2)
+                return;
+
+            var currentBarTime = Bars.OpenTimes[Bars.Count - 1];
+            if (!_futureSpaceInitialized)
+            {
+                // Shift the viewport into the future blank area so labels anchored at
+                // current-bar + 40 M5 intervals are actually visible, not over candles.
+                Chart.ScrollXBy(GuideLabelOffsetBars);
+                _futureSpaceInitialized = true;
+                _lastFutureSpaceBarTime = currentBarTime;
+                return;
+            }
+
+            // Keep the same 40-bar gap as new M5 candles arrive.
+            if (currentBarTime != _lastFutureSpaceBarTime)
+            {
+                Chart.ScrollXBy(1);
+                _lastFutureSpaceBarTime = currentBarTime;
+            }
         }
 
         private string GetMarketGuideLineName(string key)
