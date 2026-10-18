@@ -34,7 +34,8 @@ Do not skip these tests before live use. Record the broker, account type, symbol
 - [ ] Confirm the stop moves only when the candidate is more protective.
 - [ ] Confirm commission multiplier, minimum round-trip commission reserve, spread, slippage and additional cost reserve change the estimated break-even offset as expected.
 - [ ] Confirm already-accrued negative swap increases the required break-even offset; positive swap does not reduce the conservative cost estimate.
-- [ ] Confirm the stop modification preserves the existing take-profit and stop trigger method.
+- [ ] Confirm stop modification preserves existing take-profit, stop trigger method, server-side trailing setting and native break-even settings.
+- [ ] Verify Buy break-even targets round up to tick size and Sell targets round down, then remain outside the current/broker minimum gap.
 - [ ] Test both Buy and Sell in a widening spread; observe whether stop candidates are skipped safely.
 - [ ] Verify realised net P/L after stop closure, not merely the displayed stop price.
 - [ ] Let price make higher lows/lower highs; confirm trailing follows closed-candle structure and never loosens the stop.
