@@ -1,0 +1,36 @@
+name: Build cTrader cBot
+
+on:
+  push:
+    branches:
+      - feature/stop-management-v0.1
+      - main
+  pull_request:
+    branches:
+      - main
+      - feature/stop-management-v0.1
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install .NET 6 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 6.0.x
+
+      - name: Restore and build cBot
+        shell: pwsh
+        run: dotnet build .\src\CT-STOPBOT\CT-STOPBOT.csproj --configuration Release -p:AlgoPublish=true -p:IncludeSource=false
+
+      - name: Upload compiled cBot artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CT-STOPBOT-algo
+          path: src/CT-STOPBOT/bin/Release/net6.0/CT-STOPBOT.algo
+          if-no-files-found: error
