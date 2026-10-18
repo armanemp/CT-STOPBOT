@@ -8,7 +8,7 @@ By default it manages all position labels on that symbol, including manual posit
 
 ## Initial stop
 
-1. Read the last Swing lookback **closed M5 candles**; the still-forming candle is excluded.
+1. Wait until there are enough bars for both the configured swing lookback and ATR warm-up, then read the last Swing lookback **closed M5 candles**; the still-forming candle is excluded. Do not silently calculate from incomplete startup history.
 2. For Buy, find the lowest low; for Sell, find the highest high.
 3. Place the candidate beyond that swing by the largest of:
    - ATR × configured ATR multiplier,
