@@ -169,7 +169,7 @@ namespace CTStopBot
         private readonly Dictionary<string, DateTime> _marketGuideStartTimes = new Dictionary<string, DateTime>();
         private readonly Dictionary<string, string> _marketGuideContexts = new Dictionary<string, string>();
         private const int GuideLineBarsLeft = 20;
-        private const int GuideLineBarsRight = 40;
+        private const int GuideLineBarsRight = 20;
         private const double MinimumQualityRewardRisk = 1.8;
         private const double MaximumQualitySpreadToAtr = 0.16;
         private const double MaximumQualityStopDistanceAtr = 2.25;
@@ -614,6 +614,21 @@ namespace CTStopBot
             var minimumTargetDistance = Math.Max(Symbol.TickSize * 3.0,
                 Math.Max(Symbol.Spread * 1.5, atrPrice * 0.35));
             var projectedDistance = Math.Max(atrPrice * atrMultiplier, minimumTargetDistance);
+
+            // If an initial SL is still on the loss side, first make the projected
+            // target meet the minimum cost-adjusted R:R. A nearby structure is not
+            // allowed to silently shorten this target below the risk budget.
+            if (position.StopLoss.HasValue && IsStopStillOnLossSide(position))
+            {
+                var riskDistance = direction * (position.EntryPrice - position.StopLoss.Value);
+                var costReserve = Math.Max(Symbol.Spread, Symbol.TickSize)
+                    + SlippageReservePips * Symbol.PipSize;
+                var requiredRewardRisk = Math.Max(MinimumQualityRewardRisk, MinimumPreTradeRewardRisk);
+                if (riskDistance > Symbol.TickSize)
+                    projectedDistance = Math.Max(projectedDistance,
+                        requiredRewardRisk * (riskDistance + costReserve) + costReserve);
+            }
+
             var target = position.EntryPrice + direction * projectedDistance;
             var extendedAfterTarget = false;
 
@@ -665,8 +680,18 @@ namespace CTStopBot
                 var structureDistance = direction * (structureTarget - referencePrice);
                 var projectedDistanceFromMarket = direction * (target - referencePrice);
 
+                var structurePreservesRiskReward = true;
+                if (position.StopLoss.HasValue && IsStopStillOnLossSide(position))
+                {
+                    double structureRewardRisk;
+                    structurePreservesRiskReward = TryGetCostAdjustedRewardRisk(
+                        position.EntryPrice, position.StopLoss.Value, structureTarget,
+                        position.TradeType, out structureRewardRisk);
+                }
+
                 if (structureDistance >= minimumTargetDistance &&
-                    structureDistance < projectedDistanceFromMarket)
+                    structureDistance < projectedDistanceFromMarket &&
+                    structurePreservesRiskReward)
                 {
                     target = structureTarget;
                     usedStructure = true;
@@ -1320,8 +1345,13 @@ namespace CTStopBot
                 var structureTarget = nearestLevel - direction * structureBuffer;
                 var structureDistance = direction * (structureTarget - entryPrice);
                 var projectedDistanceFromEntry = direction * (target - entryPrice);
+                double structureRewardRisk;
+                var structurePreservesRiskReward = TryGetCostAdjustedRewardRisk(
+                    entryPrice, stopPrice, structureTarget, tradeType, out structureRewardRisk);
+
                 if (structureDistance >= minimumTargetDistance &&
-                    structureDistance < projectedDistanceFromEntry)
+                    structureDistance < projectedDistanceFromEntry &&
+                    structurePreservesRiskReward)
                 {
                     target = structureTarget;
                     usedStructure = true;
@@ -1567,11 +1597,13 @@ namespace CTStopBot
             // instead of an anchor displacement partly consumed by half the text height.
             // The ATR floor scales with chart volatility; tick/pip/spread floors protect
             // symbols whose ATR or reported spread is unusually small.
-            var offset = Math.Max(Symbol.TickSize * 8.0, Symbol.PipSize * 5.0);
+            // Price-space gap must remain visible even when the chart is zoomed out.
+            // The 14px label height can exceed a small pip/spread-only displacement.
+            var offset = Math.Max(Symbol.TickSize * 12.0, Symbol.PipSize * 12.0);
             if (IsFinitePositive(atrPrice))
-                offset = Math.Max(offset, atrPrice * 0.08);
+                offset = Math.Max(offset, atrPrice * 0.25);
             if (IsFinitePositive(Symbol.Spread))
-                offset = Math.Max(offset, Symbol.Spread * 2.0);
+                offset = Math.Max(offset, Symbol.Spread * 3.0);
 
             return offset;
         }
