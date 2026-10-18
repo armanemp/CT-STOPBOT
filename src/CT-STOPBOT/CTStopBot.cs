@@ -1032,10 +1032,16 @@ namespace CTStopBot
             var projectedDistance = Math.Max(atrPrice * atrMultiplier, minimumTargetDistance);
             var target = entryPrice + direction * projectedDistance;
 
-            var nearestLevel = tradeType == TradeType.Buy ? double.MaxValue : double.MinValue;
-            var foundLevel = false;
+            double nearestLevel;
+            var foundLevel = TryFindNearestTargetPivot(
+                tradeType, lastClosedIndex, TpStructureLookback,
+                entryPrice, minimumTargetDistance, out nearestLevel);
+            var usedConfirmedPivot = foundLevel;
+            if (!foundLevel)
+                nearestLevel = tradeType == TradeType.Buy ? double.MaxValue : double.MinValue;
+
             var firstStructureIndex = lastClosedIndex - TpStructureLookback + 1;
-            for (var i = firstStructureIndex; i <= lastClosedIndex; i++)
+            for (var i = firstStructureIndex; !foundLevel && i <= lastClosedIndex; i++)
             {
                 if (tradeType == TradeType.Buy)
                 {
