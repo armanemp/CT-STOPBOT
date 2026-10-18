@@ -893,10 +893,14 @@ namespace CTStopBot
                     marketReferencePrice, atrPrice, sideKey + " ENTRY", entryColor,
                     false, true, highConfidence);
 
+                double displayedEntryPrice;
+                if (!_marketGuidePrices.TryGetValue(sideKey + "_ENTRY", out displayedEntryPrice))
+                    displayedEntryPrice = entryPrice;
+
                 if (stopIsSafe)
                 {
                     DrawOrUpdateMarketGuide(sideKey + "_SL", tradeType, stopPrice,
-                        entryPrice, atrPrice, sideKey + " SL", stopColor,
+                        displayedEntryPrice, atrPrice, sideKey + " SL", stopColor,
                         false, false, highConfidence);
                 }
                 else
@@ -907,7 +911,7 @@ namespace CTStopBot
                 if (ShowSuggestedTpLine)
                 {
                     DrawOrUpdateMarketGuide(sideKey + "_TP", tradeType, targetPrice,
-                        entryPrice, atrPrice, sideKey + " TP", targetColor,
+                        displayedEntryPrice, atrPrice, sideKey + " TP", targetColor,
                         true, false, highConfidence);
                 }
                 else
