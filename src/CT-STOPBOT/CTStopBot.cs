@@ -1094,7 +1094,7 @@ namespace CTStopBot
                 var displayedDirectionalReward = direction * (displayedTargetPrice - displayedEntryPrice);
                 var executionCostReserve = Math.Max(Symbol.Spread, Symbol.TickSize)
                     + SlippageReservePips * Symbol.PipSize;
-                double displayedRewardRisk;
+                double displayedRewardRisk = 0.0;
                 var hasDisplayedRewardRisk = ShowSuggestedTpLine &&
                     RiskRewardEngine.TryCalculateNetRewardRisk(
                         displayedDirectionalRisk, displayedDirectionalReward,
@@ -1102,7 +1102,7 @@ namespace CTStopBot
                 if (!hasDisplayedRewardRisk)
                     displayedRewardRisk = 0.0;
 
-                var targetOnCorrectSide = ShowSuggestedTpLine &&
+                var displayedTargetOnCorrectSide = ShowSuggestedTpLine &&
                     displayedDirectionalReward > minimumVisibleTargetDistance;
                 var displayedRiskOnCorrectSide = displayedDirectionalRisk >= minimumStructuralRisk;
                 var displayedStopIsSafe = stopIsSafe && displayedRiskOnCorrectSide;
@@ -1110,7 +1110,7 @@ namespace CTStopBot
                     displayedStopDistanceAtr >= MinimumQualityStopDistanceAtr &&
                     displayedStopDistanceAtr <= maximumAllowedStopDistanceAtr;
                 var displayedRewardRiskIsValid = !ShowSuggestedTpLine ||
-                    (targetOnCorrectSide && hasDisplayedRewardRisk &&
+                    (displayedTargetOnCorrectSide && hasDisplayedRewardRisk &&
                      RiskRewardEngine.MeetsMinimumNetRewardRisk(
                          displayedRewardRisk, requiredMinimumRewardRisk));
 
@@ -1150,7 +1150,7 @@ namespace CTStopBot
                     sideStatus = "PROVISIONAL — lines shown; SL! unsafe or on wrong side";
                 else if (!displayedStopDistanceIsValid)
                     sideStatus = "WAIT — provisional lines shown; SL distance outside quality range";
-                else if (ShowSuggestedTpLine && !targetOnCorrectSide)
+                else if (ShowSuggestedTpLine && !displayedTargetOnCorrectSide)
                     sideStatus = "PROVISIONAL — lines shown; TP! too close to ENTRY";
                 else if (ShowSuggestedTpLine && !hasDisplayedRewardRisk)
                     sideStatus = "WAIT — lines shown, but displayed prices do not form valid net R:R";
