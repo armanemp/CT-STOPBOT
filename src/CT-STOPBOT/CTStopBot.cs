@@ -988,6 +988,22 @@ namespace CTStopBot
             var spreadBuffer = Math.Max(Symbol.Spread, Symbol.TickSize) * SpreadBufferMultiplier;
             var minimumBuffer = MinimumWickBufferPips * Symbol.PipSize;
             var stopBuffer = Math.Max(minimumBuffer, Math.Max(atrBuffer, spreadBuffer));
+            var pivotLookback = Math.Max(SwingLookback, ConfirmedPivotStrength * 2 + 3);
+            double pivotAnchor;
+            var stopBoundary = tradeType == TradeType.Buy
+                ? Symbol.Bid - GetRequiredMarketGap(tradeType) + stopBuffer
+                : Symbol.Ask + GetRequiredMarketGap(tradeType) - stopBuffer;
+            stopUsesPivot = TryFindLatestConfirmedPivot(
+                tradeType == TradeType.Buy, lastClosedIndex, pivotLookback,
+                stopBoundary, tradeType == TradeType.Buy, out pivotAnchor);
+            if (stopUsesPivot)
+            {
+                if (tradeType == TradeType.Buy)
+                    swingLow = pivotAnchor;
+                else
+                    swingHigh = pivotAnchor;
+            }
+
             var rawStop = tradeType == TradeType.Buy
                 ? swingLow - stopBuffer
                 : swingHigh + stopBuffer;
