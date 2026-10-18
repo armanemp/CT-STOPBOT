@@ -74,12 +74,16 @@ namespace CTStopBot
         [Parameter("Minimum stop gap from market (pips)", DefaultValue = 2.0, MinValue = 0.1, MaxValue = 500.0)]
         public double MinimumMarketGapPips { get; set; }
 
-        [Parameter("Retry cooldown (seconds)", DefaultValue = 2, MinValue = 1, MaxValue = 30)]
+        [Parameter("Initial retry cooldown (seconds)", DefaultValue = 2, MinValue = 1, MaxValue = 30)]
         public int RetryCooldownSeconds { get; set; }
+
+        [Parameter("Maximum retry cooldown (seconds)", DefaultValue = 60, MinValue = 2, MaxValue = 600)]
+        public int MaximumRetryCooldownSeconds { get; set; }
 
         private AverageTrueRange _atr;
         private readonly Dictionary<int, DateTime> _lastAttemptAt = new Dictionary<int, DateTime>();
         private readonly Dictionary<int, DateTime> _lastNoticeAt = new Dictionary<int, DateTime>();
+        private readonly Dictionary<int, int> _failureCounts = new Dictionary<int, int>();
 
         protected override void OnStart()
         {
@@ -147,6 +151,7 @@ namespace CTStopBot
         {
             _lastAttemptAt.Remove(args.Position.Id);
             _lastNoticeAt.Remove(args.Position.Id);
+            _failureCounts.Remove(args.Position.Id);
         }
 
         private void ManageAllPositions()
@@ -456,8 +461,18 @@ namespace CTStopBot
             }
 
             DateTime lastAttempt;
+            var retryDelay = RetryCooldownSeconds;
+            int failures;
+            if (_failureCounts.TryGetValue(position.Id, out failures) && failures > 0)
+            {
+                var exponent = Math.Min(failures, 8);
+                var backoff = RetryCooldownSeconds * Math.Pow(2.0, exponent);
+                var maximumDelay = Math.Max(RetryCooldownSeconds, MaximumRetryCooldownSeconds);
+                retryDelay = (int)Math.Min(maximumDelay, backoff);
+            }
+
             if (_lastAttemptAt.TryGetValue(position.Id, out lastAttempt) &&
-                (Server.Time - lastAttempt).TotalSeconds < RetryCooldownSeconds)
+                (Server.Time - lastAttempt).TotalSeconds < retryDelay)
                 return;
 
             _lastAttemptAt[position.Id] = Server.Time;
@@ -469,15 +484,26 @@ namespace CTStopBot
 
             if (result.IsSuccessful)
             {
+                _failureCounts.Remove(position.Id);
                 Print("Position {0}: {1} accepted at {2}; current Pips={3:F2}, NetProfit={4:F2}, volume={5}.",
                     position.Id, reason, stopPrice, position.Pips, position.NetProfit, position.VolumeInUnits);
             }
             else
             {
-                Print("WARNING position {0}: ModifyPosition failed ({1}). Candidate stop={2}; current stop={3}; Bid={4}; Ask={5}; required market gap={6}. Verify broker distance/freeze rules and execution conditions.",
+                int previousFailures;
+                _failureCounts.TryGetValue(position.Id, out previousFailures);
+                var failureCount = previousFailures + 1;
+                _failureCounts[position.Id] = failureCount;
+                var exponent = Math.Min(failureCount, 8);
+                var backoff = RetryCooldownSeconds * Math.Pow(2.0, exponent);
+                var retryInSeconds = (int)Math.Min(
+                    Math.Max(RetryCooldownSeconds, MaximumRetryCooldownSeconds), backoff);
+
+                Print("WARNING position {0}: ModifyPosition failed ({1}). Candidate stop={2}; current stop={3}; Bid={4}; Ask={5}; required market gap={6}. Failure count={7}; retry delay={8}s. Verify broker distance/freeze rules and execution conditions.",
                     position.Id, result.Error, stopPrice,
                     position.StopLoss.HasValue ? position.StopLoss.Value.ToString() : "none",
-                    Symbol.Bid, Symbol.Ask, GetRequiredMarketGap(position.TradeType));
+                    Symbol.Bid, Symbol.Ask, GetRequiredMarketGap(position.TradeType),
+                    failureCount, retryInSeconds);
             }
         }
 
