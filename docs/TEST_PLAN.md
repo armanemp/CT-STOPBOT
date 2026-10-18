@@ -19,6 +19,7 @@ Do not skip these tests before live use. Record the broker, account type, symbol
 - [ ] Open a small demo Buy position manually with no stop; confirm a stop is installed or the exact failure is logged.
 - [ ] Repeat for Sell.
 - [ ] Open a position with an existing stop; confirm the initial-stop logic does not replace it.
+- [ ] Move price close to an existing stop; confirm the bot warns when that stop is inside the current/broker gap and never widens it.
 - [ ] Open a position while the market is moving quickly; confirm rejected/unsafe candidates are logged and the bot retries.
 - [ ] Start the cBot while an eligible position is already open without a stop; confirm it attempts protection.
 - [ ] Confirm the candidate is beyond the selected closed-candle swing and rounded to tick size.
