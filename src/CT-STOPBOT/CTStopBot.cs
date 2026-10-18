@@ -552,45 +552,33 @@ namespace CTStopBot
                     var minimumMove = Math.Max(TpMinimumUpdatePips * Symbol.PipSize, atrPrice * TpMinimumUpdateAtr);
                     var movement = Math.Abs(candidate - previousPrice);
 
-                    // Keep the price stable through small quote/indicator noise. A change
-                    // in the market regime may update the label without moving the line.
-                    if (movement < minimumMove)
+                    string previousContext;
+                    var contextChanged = !_suggestedTpContexts.TryGetValue(position.Id, out previousContext) ||
+                        !string.Equals(previousContext, context, StringComparison.Ordinal);
+                    DateTime lastAnchor;
+                    var newBar = !_suggestedTpStartTimes.TryGetValue(position.Id, out lastAnchor) ||
+                        lastAnchor != Bars.OpenTimes[Bars.Count - 1];
+                    var structureIsCurrentlyCappingTarget =
+                        context.IndexOf("/STRUCTURE", StringComparison.Ordinal) >= 0;
+
+                    // Smoothing/cooldown must not preserve an obsolete target through a
+                    // newly detected structure or a changed RR/cost status. A structure-
+                    // capped target is refreshed on each new M5 bar, even for a small move.
+                    var mustAdoptCandidate = contextChanged ||
+                        (newBar && structureIsCurrentlyCappingTarget);
+
+                    if (movement < minimumMove && !mustAdoptCandidate)
                     {
-                        string previousContext;
-                        var contextChanged = !_suggestedTpContexts.TryGetValue(position.Id, out previousContext) ||
-                            !string.Equals(previousContext, context, StringComparison.Ordinal);
-                        DateTime lastAnchor;
-                        var newBar = !_suggestedTpStartTimes.TryGetValue(position.Id, out lastAnchor) ||
-                            lastAnchor != Bars.OpenTimes[Bars.Count - 1];
-                        var structureIsCurrentlyCappingTarget =
-                            context.IndexOf("/STRUCTURE", StringComparison.Ordinal) >= 0;
-
-                        // Smoothing is subordinate to structural safety. If the regime/warning
-                        // changes, immediately adopt the recalculated candidate. If a target is
-                        // structure-capped, refresh it on each new closed-candle interval so an
-                        // old line cannot remain beyond a newly formed/closer barrier.
-                        var mustAdoptCandidate = contextChanged ||
-                            (newBar && structureIsCurrentlyCappingTarget);
-                        if (mustAdoptCandidate)
-                        {
-                            DrawSuggestedTpObjects(position, candidate, context);
-                            _suggestedTpPrices[position.Id] = candidate;
-                            _suggestedTpUpdatedAt[position.Id] = Server.Time;
-                            _suggestedTpContexts[position.Id] = context;
-                        }
-                        else if (newBar)
-                        {
+                        if (newBar)
                             DrawSuggestedTpObjects(position, previousPrice, context);
-                            _suggestedTpContexts[position.Id] = context;
-                        }
-
                         return;
                     }
 
                     DateTime lastUpdate;
-                    if (TpUpdateCooldownSeconds > 0 &&
+                    var cooldownActive = TpUpdateCooldownSeconds > 0 &&
                         _suggestedTpUpdatedAt.TryGetValue(position.Id, out lastUpdate) &&
-                        (Server.Time - lastUpdate).TotalSeconds < TpUpdateCooldownSeconds)
+                        (Server.Time - lastUpdate).TotalSeconds < TpUpdateCooldownSeconds;
+                    if (cooldownActive && !mustAdoptCandidate)
                         return;
                 }
 
@@ -682,15 +670,10 @@ namespace CTStopBot
                 extendedAfterTarget = true;
             }
 
-            // While price remains on the loss side, the target still represents a
-            // profitable objective from entry: ignore barriers already behind entry.
-            // Once the position is in profit, evaluate the next barrier from the live
-            // executable quote so a reached target can extend to the next objective.
-            // Always inspect the nearest opposing closed-candle structure, including
-            // barriers close to the projected target. While price remains on the loss side,
-            // use ENTRY as the reference so structures already behind entry cannot turn a
-            // profit target into a loss-level objective. Once price is in profit, use the
-            // executable quote to find the next barrier for a reached/extended target.
+            // While price remains on the loss side, use ENTRY as the reference so a
+            // structure behind ENTRY cannot be misread as a profitable objective. Once
+            // price is in profit, evaluate the next barrier from the executable quote.
+            // Always scan closed bars so a nearer extreme cannot be hidden by a distant pivot.
             var structureReferencePrice =
                 direction * (referencePrice - position.EntryPrice) > Symbol.TickSize * 0.5
                     ? referencePrice
