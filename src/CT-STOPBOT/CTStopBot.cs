@@ -1045,7 +1045,7 @@ namespace CTStopBot
                 nearestLevel = tradeType == TradeType.Buy ? double.MaxValue : double.MinValue;
 
             var firstStructureIndex = lastClosedIndex - TpStructureLookback + 1;
-            for (var i = firstStructureIndex; !foundLevel && i <= lastClosedIndex; i++)
+            for (var i = firstStructureIndex; !usedConfirmedPivot && i <= lastClosedIndex; i++)
             {
                 if (tradeType == TradeType.Buy)
                 {
