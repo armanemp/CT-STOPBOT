@@ -14,7 +14,8 @@ Initial target: XAUUSD / Gold on the 5-minute chart. The first iteration focuses
 - Uses the broker-reported minimum stop-loss distance where available (in pips or percentage units), alongside the configured minimum gap.
 - Prints diagnostic symbol data at startup, including spread, pip/tick sizes, pip value, and broker minimum stop distance.
 - Tightens an existing stop using recent closed-candle structure; never intentionally moves it away from the market.
-- Logs rejected/failed modifications and retries after a cooldown.
+- Logs rejected/failed modifications and retries with exponential backoff.
+- Uses emergency fallback only for missing initial protection; an invalidated trailing candidate is skipped rather than snapped to market.
 - Includes a label filter for users who do not want to manage every position on the selected symbol.
 - Supports independent switches for initial stop, break-even and structural trailing; position-level exceptions are logged instead of silently aborting the management loop.
 - Leaves positions with native server-side trailing untouched by default and preserves stop trigger/trailing settings when a stop is modified.
