@@ -143,6 +143,11 @@ namespace CTStopBot
         private readonly Dictionary<string, string> _marketGuideContexts = new Dictionary<string, string>();
         private const int GuideLineBarsLeft = 20;
         private const int GuideLineBarsRight = 20;
+        private const double MinimumQualityRewardRisk = 1.8;
+        private const double MaximumQualitySpreadToAtr = 0.16;
+        private const double MaximumQualityStopDistanceAtr = 2.25;
+        private const double MinimumQualityStopDistanceAtr = 0.25;
+        private const double MinimumDirectionalAlignment = 0.65;
         protected override void OnStart()
         {
             if (TimeFrame != cAlgo.API.TimeFrame.Minute5)
@@ -879,12 +884,15 @@ namespace CTStopBot
             var stopOnCorrectSide = calculated && directionalRisk >= minimumStructuralRisk;
             var targetOnCorrectSide = calculated &&
                 directionalReward > Math.Max(Symbol.TickSize * 2.0, Symbol.Spread * 1.5);
+            var requiredMinimumRewardRisk = Math.Max(MinimumQualityRewardRisk, MinimumPreTradeRewardRisk);
+            var maximumAllowedSpreadToAtr = Math.Min(MaximumQualitySpreadToAtr, MaxSpreadToAtrRatio);
+            var maximumAllowedStopDistanceAtr = Math.Min(MaximumQualityStopDistanceAtr, MaximumPreTradeStopDistanceAtr);
 
             var highConfidence = calculated && stopIsSafe && stopOnCorrectSide && targetOnCorrectSide &&
-                !overextended && spreadToAtr <= MaxSpreadToAtrRatio &&
-                stopDistanceAtr >= 0.25 && stopDistanceAtr <= MaximumPreTradeStopDistanceAtr &&
-                rewardRisk >= MinimumPreTradeRewardRisk &&
-                sideAlignment >= 0.65 && trendSupportsSide && momentumSupportsSide;
+                !overextended && spreadToAtr <= maximumAllowedSpreadToAtr &&
+                stopDistanceAtr >= MinimumQualityStopDistanceAtr && stopDistanceAtr <= maximumAllowedStopDistanceAtr &&
+                rewardRisk >= requiredMinimumRewardRisk &&
+                sideAlignment >= MinimumDirectionalAlignment && trendSupportsSide && momentumSupportsSide;
 
             if (!calculated)
                 setupQuality = "WAIT — no valid structural setup";
@@ -894,18 +902,18 @@ namespace CTStopBot
                 setupQuality = "WAIT — SL is too close or on the wrong side of ENTRY";
             else if (!targetOnCorrectSide)
                 setupQuality = "WAIT — TP is too close or on the wrong side of ENTRY";
-            else if (stopDistanceAtr < 0.25)
+            else if (stopDistanceAtr < MinimumQualityStopDistanceAtr)
                 setupQuality = "WAIT — structural SL is too tight/noise-sensitive";
-            else if (stopDistanceAtr > MaximumPreTradeStopDistanceAtr)
+            else if (stopDistanceAtr > Math.Min(MaximumQualityStopDistanceAtr, MaximumPreTradeStopDistanceAtr))
                 setupQuality = "WAIT — structural SL too wide";
-            else if (rewardRisk < MinimumPreTradeRewardRisk)
+            else if (rewardRisk < Math.Max(MinimumQualityRewardRisk, MinimumPreTradeRewardRisk))
                 setupQuality = "WAIT — cost-adjusted reward/risk below filter";
-            else if (spreadToAtr > MaxSpreadToAtrRatio)
+            else if (spreadToAtr > Math.Min(MaximumQualitySpreadToAtr, MaxSpreadToAtrRatio))
                 setupQuality = "WAIT — spread/ATR too high";
+            else if (sideAlignment < MinimumDirectionalAlignment)
+                setupQuality = "WAIT — directional alignment is not strong enough";
             else if (overextended)
                 setupQuality = "WAIT — RSI/momentum stretched";
-            else if (sideAlignment < 0.65)
-                setupQuality = "WAIT — directional alignment is not strong enough";
             else if (!trendSupportsSide)
                 setupQuality = "WAIT — trend structure does not confirm this side";
             else if (!momentumSupportsSide)
@@ -1179,10 +1187,10 @@ namespace CTStopBot
                 overextended);
             if (!stopIsSafe)
                 quality = "WAIT — SL invalid at current quote/broker gap";
-            else if (stopDistanceAtr > MaximumPreTradeStopDistanceAtr)
+            else if (stopDistanceAtr > Math.Min(MaximumQualityStopDistanceAtr, MaximumPreTradeStopDistanceAtr))
                 quality = "WAIT — structural SL too wide";
-            else if (rewardRisk < MinimumPreTradeRewardRisk)
-                quality = "WAIT — reward/risk below filter";
+            else if (rewardRisk < Math.Max(MinimumQualityRewardRisk, MinimumPreTradeRewardRisk))
+                quality = "WAIT — cost-adjusted reward/risk below filter";
             else if ((tradeType == TradeType.Buy && trendText == "BEARISH" && momentumText == "DOWN") ||
                      (tradeType == TradeType.Sell && trendText == "BULLISH" && momentumText == "UP"))
                 quality = "WAIT — trend and momentum oppose this side";
@@ -1343,7 +1351,8 @@ namespace CTStopBot
                 return false;
 
             rewardRisk = (rewardDistance - costReserve) / (riskDistance + costReserve);
-            return IsFiniteNumber(rewardRisk) && rewardRisk >= MinimumPreTradeRewardRisk;
+            return IsFiniteNumber(rewardRisk) &&
+                rewardRisk >= Math.Max(MinimumQualityRewardRisk, MinimumPreTradeRewardRisk);
         }
 
         private double GetCurrentAtrPrice()
