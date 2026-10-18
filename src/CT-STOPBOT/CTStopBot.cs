@@ -135,6 +135,9 @@ namespace CTStopBot
         [Parameter("Slippage reserve (pips)", DefaultValue = 2.0, MinValue = 0.0, MaxValue = 100.0)]
         public double SlippageReservePips { get; set; }
 
+        [Parameter("Pre-entry commission reserve (pips)", DefaultValue = 0.0, MinValue = 0.0, MaxValue = 1000.0)]
+        public double PreEntryCommissionReservePips { get; set; }
+
         [Parameter("Minimum net lock (pips)", DefaultValue = 0.5, MinValue = 0.0, MaxValue = 100.0)]
         public double MinimumNetLockPips { get; set; }
 
@@ -608,8 +611,11 @@ namespace CTStopBot
             // after BE/trailing has moved the active stop. Never redefine R from a tighter SL.
             double originalRiskDistance;
             var hasOriginalRisk = TryGetOrRecoverInitialRisk(position, out originalRiskDistance);
-            var costReserve = Math.Max(Symbol.Spread, Symbol.TickSize)
-                + SlippageReservePips * Symbol.PipSize;
+            double costReserve;
+            var positionCostEstimateAvailable = TryGetPositionCostReservePrice(position, out costReserve);
+            if (!positionCostEstimateAvailable)
+                costReserve = Math.Max(Symbol.Spread, Symbol.TickSize) +
+                    SlippageReservePips * Symbol.PipSize;
             var minimumNetRewardRisk = Math.Max(MinimumQualityRewardRisk, MinimumPreTradeRewardRisk);
             if (hasOriginalRisk)
             {
@@ -693,7 +699,7 @@ namespace CTStopBot
                 direction * (targetPrice - referencePrice) < minimumTargetDistance)
                 context += "/TIGHT";
 
-            if (hasOriginalRisk)
+            if (hasOriginalRisk && positionCostEstimateAvailable)
             {
                 double currentNetRewardRisk;
                 var rewardDistance = direction * (targetPrice - position.EntryPrice);
@@ -706,11 +712,15 @@ namespace CTStopBot
                     context += "/RRLOW";
                 }
             }
-            else
+            else if (!hasOriginalRisk)
             {
                 // Do not imply this TP is 1.8R when an already-protected position's
                 // original risk cannot be recovered from trusted persisted state.
                 context += "/R_UNKNOWN";
+            }
+            else
+            {
+                context += "/COST_UNKNOWN";
             }
 
             return IsFinitePositive(targetPrice);
@@ -774,16 +784,19 @@ namespace CTStopBot
                 context.IndexOf("/R_UNKNOWN", StringComparison.Ordinal) >= 0;
             var targetIsTight = context != null &&
                 context.IndexOf("/TIGHT", StringComparison.Ordinal) >= 0;
-            var targetLabel = targetIsLowRr || targetRiskUnknown || targetIsTight ? "TP!" : "TP";
-            var ratioText = targetRiskUnknown ? " | R:R n/a" : string.Empty;
+            var targetCostUnknown = context != null &&
+                context.IndexOf("/COST_UNKNOWN", StringComparison.Ordinal) >= 0;
+            var targetLabel = targetIsLowRr || targetRiskUnknown || targetCostUnknown || targetIsTight ? "TP!" : "TP";
+            var ratioText = targetRiskUnknown ? " | R:R n/a" :
+                targetCostUnknown ? " | R:R costs n/a" : string.Empty;
             if (targetIsTight)
                 ratioText += " | tight structure";
             double originalRisk;
             double netRewardRisk;
-            var costReserve = Math.Max(Symbol.Spread, Symbol.TickSize)
-                + SlippageReservePips * Symbol.PipSize;
+            double costReserve;
+            var positionCostEstimateAvailable = TryGetPositionCostReservePrice(position, out costReserve);
             var direction = position.TradeType == TradeType.Buy ? 1.0 : -1.0;
-            if (!targetRiskUnknown &&
+            if (!targetRiskUnknown && !targetCostUnknown && positionCostEstimateAvailable &&
                 _initialRiskPriceByPosition.TryGetValue(position.Id, out originalRisk) &&
                 RiskRewardEngine.TryCalculateNetRewardRisk(
                     originalRisk, direction * (targetPrice - position.EntryPrice),
@@ -1108,8 +1121,7 @@ namespace CTStopBot
                     : double.MaxValue;
                 var displayedDirectionalRisk = direction * (displayedEntryPrice - displayedStopPrice);
                 var displayedDirectionalReward = direction * (displayedTargetPrice - displayedEntryPrice);
-                var executionCostReserve = Math.Max(Symbol.Spread, Symbol.TickSize)
-                    + SlippageReservePips * Symbol.PipSize;
+                var executionCostReserve = GetPreEntryCostReservePrice();
                 double displayedRewardRisk = 0.0;
                 var hasDisplayedRewardRisk = ShowSuggestedTpLine &&
                     RiskRewardEngine.TryCalculateNetRewardRisk(
@@ -1330,8 +1342,7 @@ namespace CTStopBot
             // rather than allowing the TP to ignore a resistance/support barrier.
             var directionalRiskBeforeCosts = direction * (entryPrice - stopPrice);
             var requiredMinimumRewardRisk = Math.Max(MinimumQualityRewardRisk, MinimumPreTradeRewardRisk);
-            var executionCostReserve = Math.Max(Symbol.Spread, Symbol.TickSize)
-                + SlippageReservePips * Symbol.PipSize;
+            var executionCostReserve = GetPreEntryCostReservePrice();
             if (directionalRiskBeforeCosts > Symbol.TickSize)
             {
                 double minimumRewardDistanceForRisk;
@@ -2118,37 +2129,78 @@ namespace CTStopBot
             return IsSafeRelativeToMarket(stopPrice, position.TradeType);
         }
 
+        private double GetPreEntryCostReservePrice()
+        {
+            if (Symbol.PipSize <= 0 || Symbol.TickSize <= 0)
+                return 0.0;
+
+            return Math.Max(Symbol.Spread, Symbol.TickSize) +
+                (SlippageReservePips + PreEntryCommissionReservePips) * Symbol.PipSize;
+        }
+
+        private bool TryGetEstimatedRoundTripCostCash(Position position, out double costCash)
+        {
+            costCash = 0.0;
+            if (position == null)
+                return false;
+
+            // Commissions reports the one-way cash cost. Include a round-trip multiplier,
+            // the configured minimum commission, already accrued negative swap and extra costs.
+            var commissionCash = Math.Max(
+                Math.Abs(position.Commissions) * RoundTripCommissionMultiplier,
+                MinimumRoundTripCommissionReserve);
+            var result = commissionCash + Math.Max(0.0, -position.Swap) + AdditionalCostReserve;
+            if (double.IsNaN(result) || double.IsInfinity(result) || result < 0.0)
+                return false;
+
+            costCash = result;
+            return true;
+        }
+
+        private bool TryGetPositionCostReservePrice(Position position, out double costReserve)
+        {
+            costReserve = GetPreEntryCostReservePrice();
+            if (position == null || Symbol.PipSize <= 0 || Symbol.TickSize <= 0 ||
+                double.IsNaN(costReserve) || double.IsInfinity(costReserve))
+                return false;
+
+            double costCash;
+            if (!TryGetEstimatedRoundTripCostCash(position, out costCash))
+                return false;
+            if (costCash <= 0.0)
+                return true;
+
+            var pipValueForPosition = Symbol.PipValue * position.VolumeInUnits;
+            if (pipValueForPosition <= 0.0 || double.IsNaN(pipValueForPosition) ||
+                double.IsInfinity(pipValueForPosition))
+                return false;
+
+            costReserve += (costCash / pipValueForPosition) * Symbol.PipSize;
+            return !double.IsNaN(costReserve) && !double.IsInfinity(costReserve) && costReserve >= 0.0;
+        }
+
         private bool TryGetRequiredBreakEvenOffsetPips(Position position, out double offsetPips)
         {
             offsetPips = 0.0;
 
-            if (Symbol.PipSize <= 0 || Symbol.LotSize <= 0 || Symbol.PipValue <= 0)
+            if (position == null || Symbol.PipSize <= 0 || Symbol.LotSize <= 0 || Symbol.PipValue <= 0)
                 return false;
 
-            // cTrader's Symbol.PipValue is used with volume in units in its risk examples.
-            // It is fixed when the cBot starts, so account-currency conversion can drift over time.
+            // cTrader's PipValue is fixed at cBot startup; use live position volume and
+            // broker-reported commission/swap cash costs when estimating the offset.
             var pipValueForPosition = Symbol.PipValue * position.VolumeInUnits;
             if (pipValueForPosition <= 0 || double.IsNaN(pipValueForPosition) ||
                 double.IsInfinity(pipValueForPosition))
                 return false;
 
-            // Position.Commissions is the one-way commission for opening the position.
-            // The multiplier estimates the round trip. Count already-accrued negative
-            // swap as a cost; do not rely on future swap being predictable.
-            var accruedNegativeSwapCash = Math.Max(0.0, -position.Swap);
-            var estimatedRoundTripCommissionCash =
-                Math.Max(Math.Abs(position.Commissions) * RoundTripCommissionMultiplier,
-                         MinimumRoundTripCommissionReserve);
+            double estimatedCostCash;
+            if (!TryGetEstimatedRoundTripCostCash(position, out estimatedCostCash))
+                return false;
 
-            var estimatedCommissionCash =
-                estimatedRoundTripCommissionCash
-                + accruedNegativeSwapCash
-                + AdditionalCostReserve;
-
-            var commissionPips = estimatedCommissionCash / pipValueForPosition;
+            var commissionAndFeePips = estimatedCostCash / pipValueForPosition;
             var spreadPips = (Symbol.Spread / Symbol.PipSize) * BreakEvenSpreadMultiplier;
 
-            offsetPips = spreadPips + commissionPips + SlippageReservePips + MinimumNetLockPips;
+            offsetPips = spreadPips + commissionAndFeePips + SlippageReservePips + MinimumNetLockPips;
             return !double.IsNaN(offsetPips) && !double.IsInfinity(offsetPips) && offsetPips >= 0.0;
         }
 
