@@ -65,6 +65,15 @@ namespace CTStopBot
         [Parameter("Pre-trade guide update cooldown (seconds)", DefaultValue = 3, MinValue = 0, MaxValue = 120)]
         public int GuideUpdateCooldownSeconds { get; set; }
 
+        [Parameter("Minimum pre-trade reward/risk filter", DefaultValue = 1.5, MinValue = 0.5, MaxValue = 5.0)]
+        public double MinimumPreTradeRewardRisk { get; set; }
+
+        [Parameter("Maximum pre-trade SL distance (ATR)", DefaultValue = 2.5, MinValue = 0.5, MaxValue = 10.0)]
+        public double MaximumPreTradeStopDistanceAtr { get; set; }
+
+        [Parameter("Confirmed pivot strength (bars each side)", DefaultValue = 2, MinValue = 1, MaxValue = 5)]
+        public int ConfirmedPivotStrength { get; set; }
+
         [Parameter("Swing lookback (closed M5 candles)", DefaultValue = 5, MinValue = 2, MaxValue = 50)]
         public int SwingLookback { get; set; }
 
