@@ -1335,6 +1335,30 @@ namespace CTStopBot
             var minimumBuffer = MinimumWickBufferPips * Symbol.PipSize;
             var buffer = Math.Max(minimumBuffer, Math.Max(spreadBuffer, atrBuffer));
 
+            if (allowFallback)
+            {
+                // Use the same confirmed-pivot rule as the pre-entry SL suggestion,
+                // so the initial stop does not silently switch to a different structure.
+                var pivotLookback = Math.Max(SwingLookback, ConfirmedPivotStrength * 2 + 3);
+                double pivotAnchor;
+                var stopBoundary = position.TradeType == TradeType.Buy
+                    ? Symbol.Bid - GetRequiredMarketGap(position.TradeType) + buffer
+                    : Symbol.Ask + GetRequiredMarketGap(position.TradeType) - buffer;
+                if (TryFindLatestConfirmedPivot(
+                    position.TradeType == TradeType.Buy,
+                    lastClosedIndex,
+                    pivotLookback,
+                    stopBoundary,
+                    position.TradeType == TradeType.Buy,
+                    out pivotAnchor))
+                {
+                    if (position.TradeType == TradeType.Buy)
+                        swingLow = pivotAnchor;
+                    else
+                        swingHigh = pivotAnchor;
+                }
+            }
+
             var rawPrice = position.TradeType == TradeType.Buy
                 ? swingLow - buffer
                 : swingHigh + buffer;
