@@ -795,39 +795,35 @@ namespace CTStopBot
                 ? targetPrice + labelOffset
                 : targetPrice - labelOffset;
 
-            var targetIsLowRr = context != null &&
-                context.IndexOf("/RRLOW", StringComparison.Ordinal) >= 0;
-            var targetRiskUnknown = context != null &&
-                context.IndexOf("/R_UNKNOWN", StringComparison.Ordinal) >= 0;
-            var targetIsTight = context != null &&
-                context.IndexOf("/TIGHT", StringComparison.Ordinal) >= 0;
-            var targetCostUnknown = context != null &&
-                context.IndexOf("/COST_UNKNOWN", StringComparison.Ordinal) >= 0;
-            var targetLabel = targetIsLowRr || targetRiskUnknown || targetCostUnknown || targetIsTight ? "TP!" : "TP";
-            var ratioText = targetRiskUnknown ? " | R:R n/a" :
-                targetCostUnknown ? " | R:R costs n/a" : string.Empty;
-            if (targetIsTight)
-                ratioText += " | tight structure";
+            // Keep each line label minimal. Risk/reward quality is shown in the static
+            // status summary, not squeezed into or placed on top of the horizontal guide.
             double originalRisk;
             double netRewardRisk;
             double costReserve;
-            var positionCostEstimateAvailable = TryGetPositionCostReservePrice(position, out costReserve);
+            var hasOriginalRisk = _initialRiskPriceByPosition.TryGetValue(position.Id, out originalRisk) &&
+                IsFinitePositive(originalRisk);
+            var hasCostEstimate = TryGetPositionCostReservePrice(position, out costReserve);
             var direction = position.TradeType == TradeType.Buy ? 1.0 : -1.0;
-            if (!targetRiskUnknown && !targetCostUnknown && positionCostEstimateAvailable &&
-                _initialRiskPriceByPosition.TryGetValue(position.Id, out originalRisk) &&
+            var minRr = Math.Max(MinimumQualityRewardRisk, MinimumPreTradeRewardRisk);
+            var targetIsRiskOrCostUnknown = !hasOriginalRisk || !hasCostEstimate;
+            var targetHasValidRr = hasOriginalRisk && hasCostEstimate &&
                 RiskRewardEngine.TryCalculateNetRewardRisk(
                     originalRisk, direction * (targetPrice - position.EntryPrice),
-                    costReserve, out netRewardRisk))
-            {
-                var minRr = Math.Max(MinimumQualityRewardRisk, MinimumPreTradeRewardRisk);
-                ratioText = string.Format(CultureInfo.InvariantCulture, " | R:R {0:F2}", netRewardRisk);
-                if (!RiskRewardEngine.MeetsMinimumNetRewardRisk(netRewardRisk, minRr))
-                    targetLabel = "TP!";
-            }
+                    costReserve, out netRewardRisk);
+            var targetIsLowRr = !targetIsRiskOrCostUnknown &&
+                (!targetHasValidRr ||
+                 !RiskRewardEngine.MeetsMinimumNetRewardRisk(netRewardRisk, minRr));
+
+            var currentExecutablePrice = position.TradeType == TradeType.Buy ? Symbol.Bid : Symbol.Ask;
+            var atrPrice = GetCurrentAtrPrice();
+            var minimumVisibleTargetDistance = Math.Max(Symbol.TickSize * 3.0,
+                Math.Max(Symbol.Spread * 1.5, atrPrice * 0.35));
+            var targetIsTight = direction * (targetPrice - currentExecutablePrice) < minimumVisibleTargetDistance;
+            var targetLabel = targetIsLowRr || targetIsRiskOrCostUnknown || targetIsTight ? "TP!" : "TP";
 
             var label = Chart.DrawText(textName,
-                string.Format(CultureInfo.InvariantCulture, "{0} | {1:F1} pips{2}",
-                    targetLabel, distancePips, ratioText),
+                string.Format(CultureInfo.InvariantCulture, "{0} | {1:F1} pips",
+                    targetLabel, distancePips),
                 endTime, labelPrice, color);
             label.FontSize = 14;
             label.FontFamily = "Segoe UI Light";
@@ -912,7 +908,11 @@ namespace CTStopBot
                 UpdateOneSideGuidance(TradeType.Sell, signalScore, atrPrice, rsi, spreadToAtr,
                     trendText, momentumText, overextended, out sellStatus);
 
-                DrawMarketStatusText("CT-STOPBOT | BUY: " + buyStatus + "\nSELL: " + sellStatus);
+                var statusText = "CT-STOPBOT | BUY: " + buyStatus + "\nSELL: " + sellStatus;
+                var openTpStatus = GetOpenPositionTpQualitySummary();
+                if (!string.IsNullOrWhiteSpace(openTpStatus))
+                    statusText += "\n" + openTpStatus;
+                DrawMarketStatusText(statusText);
 
             }
             catch (Exception ex)
@@ -1478,6 +1478,72 @@ namespace CTStopBot
             if (alignment <= -0.35)
                 return "COUNTER-TREND / WAIT";
             return "MIXED / WAIT";
+        }
+
+        private string GetOpenPositionTpQualitySummary()
+        {
+            var total = 0;
+            var qualified = 0;
+            var attention = 0;
+            var unknown = 0;
+
+            foreach (var position in Positions)
+            {
+                if (!IsManaged(position))
+                    continue;
+
+                total++;
+                if (!ShowSuggestedTpLine)
+                    continue;
+
+                double targetPrice;
+                if (!_suggestedTpPrices.TryGetValue(position.Id, out targetPrice))
+                {
+                    unknown++;
+                    continue;
+                }
+
+                double originalRisk;
+                if (!_initialRiskPriceByPosition.TryGetValue(position.Id, out originalRisk) ||
+                    !IsFinitePositive(originalRisk))
+                {
+                    unknown++;
+                    continue;
+                }
+
+                double costReserve;
+                if (!TryGetPositionCostReservePrice(position, out costReserve))
+                {
+                    unknown++;
+                    continue;
+                }
+
+                double netRewardRisk;
+                var direction = position.TradeType == TradeType.Buy ? 1.0 : -1.0;
+                var hasValidRr = RiskRewardEngine.TryCalculateNetRewardRisk(
+                    originalRisk, direction * (targetPrice - position.EntryPrice),
+                    costReserve, out netRewardRisk);
+                var minimumRr = Math.Max(MinimumQualityRewardRisk, MinimumPreTradeRewardRisk);
+                var currentExecutablePrice = position.TradeType == TradeType.Buy ? Symbol.Bid : Symbol.Ask;
+                var atrPrice = GetCurrentAtrPrice();
+                var minimumTargetDistance = Math.Max(Symbol.TickSize * 3.0,
+                    Math.Max(Symbol.Spread * 1.5, atrPrice * 0.35));
+                var isTight = direction * (targetPrice - currentExecutablePrice) < minimumTargetDistance;
+
+                if (!hasValidRr || !RiskRewardEngine.MeetsMinimumNetRewardRisk(netRewardRisk, minimumRr) || isTight)
+                    attention++;
+                else
+                    qualified++;
+            }
+
+            if (total == 0)
+                return string.Empty;
+            if (!ShowSuggestedTpLine)
+                return "OPEN TP: display disabled (visual only)";
+
+            return string.Format(CultureInfo.InvariantCulture,
+                "OPEN TP R:R: {0} OK | {1} TP! | {2} unverified (visual only)",
+                qualified, attention, unknown);
         }
 
         private void GetManagedPositionProtectionCounts(TradeType tradeType, out int total, out int unprotected)
