@@ -1255,9 +1255,10 @@ namespace CTStopBot
 
             var directionalRiskDistance = direction * (entryPrice - stopPrice);
             var directionalRewardDistance = direction * (targetPrice - entryPrice);
-            var executionCostReserve = Math.Max(Symbol.Spread, Symbol.TickSize)
-                + SlippageReservePips * Symbol.PipSize;
 
+            // Reuse the same execution-cost reserve that was used to project the
+            // minimum reward distance above; do not let the target projection and
+            // the final R:R validation use two independently declared cost models.
             // Reject the geometry later if the structural stop is on the wrong side.
             // R:R is deliberately conservative: reserve spread and configured slippage
             // from reward, and add the same reserve to risk. Commission cannot be
