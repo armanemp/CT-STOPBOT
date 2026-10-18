@@ -50,6 +50,21 @@ namespace CTStopBot
         [Parameter("TP update cooldown (seconds)", DefaultValue = 2, MinValue = 0, MaxValue = 30)]
         public int TpUpdateCooldownSeconds { get; set; }
 
+        [Parameter("Show pre-trade SL/TP guidance and market conditions", DefaultValue = true)]
+        public bool ShowPreTradeGuidance { get; set; }
+
+        [Parameter("Maximum spread / ATR ratio for favorable setup", DefaultValue = 0.18, MinValue = 0.01, MaxValue = 1.0)]
+        public double MaxSpreadToAtrRatio { get; set; }
+
+        [Parameter("Pre-trade guide minimum update move (ATR)", DefaultValue = 0.12, MinValue = 0.01, MaxValue = 2.0)]
+        public double GuideMinimumUpdateAtr { get; set; }
+
+        [Parameter("Pre-trade guide minimum update move (pips)", DefaultValue = 2.0, MinValue = 0.1, MaxValue = 100.0)]
+        public double GuideMinimumUpdatePips { get; set; }
+
+        [Parameter("Pre-trade guide update cooldown (seconds)", DefaultValue = 3, MinValue = 0, MaxValue = 120)]
+        public int GuideUpdateCooldownSeconds { get; set; }
+
         [Parameter("Swing lookback (closed M5 candles)", DefaultValue = 5, MinValue = 2, MaxValue = 50)]
         public int SwingLookback { get; set; }
 
@@ -104,6 +119,7 @@ namespace CTStopBot
         private AverageTrueRange _atr;
         private ExponentialMovingAverage _tpFastEma;
         private ExponentialMovingAverage _tpSlowEma;
+        private ExponentialMovingAverage _tpTrendEma;
         private RelativeStrengthIndex _tpRsi;
         private readonly Dictionary<int, DateTime> _lastAttemptAt = new Dictionary<int, DateTime>();
         private readonly Dictionary<int, DateTime> _lastNoticeAt = new Dictionary<int, DateTime>();
@@ -111,6 +127,10 @@ namespace CTStopBot
         private readonly Dictionary<int, double> _suggestedTpPrices = new Dictionary<int, double>();
         private readonly Dictionary<int, DateTime> _suggestedTpUpdatedAt = new Dictionary<int, DateTime>();
         private readonly Dictionary<int, string> _suggestedTpContexts = new Dictionary<int, string>();
+        private readonly Dictionary<string, double> _marketGuidePrices = new Dictionary<string, double>();
+        private readonly Dictionary<string, DateTime> _marketGuideUpdatedAt = new Dictionary<string, DateTime>();
+        private readonly Dictionary<string, string> _marketGuideContexts = new Dictionary<string, string>();
+        private string _lastMarketStatusText = string.Empty;
 
         protected override void OnStart()
         {
@@ -143,6 +163,7 @@ namespace CTStopBot
             _atr = Indicators.AverageTrueRange(Bars, AtrPeriod, MovingAverageType.Simple);
             _tpFastEma = Indicators.ExponentialMovingAverage(Bars.ClosePrices, 9);
             _tpSlowEma = Indicators.ExponentialMovingAverage(Bars.ClosePrices, 21);
+            _tpTrendEma = Indicators.ExponentialMovingAverage(Bars.ClosePrices, 50);
             _tpRsi = Indicators.RelativeStrengthIndex(Bars.ClosePrices, 14);
 
             Positions.Opened += OnPositionOpened;
@@ -158,10 +179,14 @@ namespace CTStopBot
                 EnableInitialStopPlacement, EnableBreakEven, EnableStructureTrailing, ManagePositionsWithServerTrailing, RestrictToLabel);
             Print("Suggested TP line: enabled={0} (visual only; the cBot never creates or changes a take-profit order).",
                 ShowSuggestedTpLine);
+            Print("Pre-trade guidance: enabled={0}; uses closed-candle EMA 9/21/50, RSI, momentum, ATR, spread, and recent market structure. Alignment score is heuristic, not a probability or entry order.",
+                ShowPreTradeGuidance);
 
             // Protect eligible positions that were already open when the cBot started.
             foreach (var position in Positions)
                 ManagePosition(position);
+
+            UpdatePreTradeGuidance();
 
             // Timer retries failed/missing initial protection even during quiet ticks.
             Timer.Start(1);
@@ -184,12 +209,17 @@ namespace CTStopBot
 
             foreach (var positionId in new List<int>(_suggestedTpPrices.Keys))
                 RemoveSuggestedTpObjects(positionId);
+
+            RemoveAllPreTradeGuideObjects();
         }
 
         private void OnPositionOpened(PositionOpenedEventArgs args)
         {
             if (IsManaged(args.Position))
+            {
                 ManagePosition(args.Position);
+                UpdatePreTradeGuidance();
+            }
         }
 
         private void OnPositionClosed(PositionClosedEventArgs args)
@@ -199,10 +229,15 @@ namespace CTStopBot
             _lastNoticeAt.Remove(args.Position.Id);
             _failureCounts.Remove(args.Position.Id);
             RemoveSuggestedTpObjects(args.Position.Id);
+            UpdatePreTradeGuidance();
         }
 
         private void ManageAllPositions()
         {
+            // Keep the pre-entry map fresh, then manage every matching open position
+            // independently. The chart-only calculation cannot block SL management.
+            UpdatePreTradeGuidance();
+
             foreach (var position in Positions)
                 ManagePosition(position);
         }
@@ -555,6 +590,8 @@ namespace CTStopBot
         {
             var startTime = Bars.OpenTimes[Bars.Count - 1];
             var endTime = startTime.AddMinutes(15.0);
+            // Keep the live position target visually distinct from pre-entry labels;
+            // its line remains keyed to this position ID until that position closes.
             var color = position.TradeType == TradeType.Buy ? Color.Green : Color.Red;
             var lineName = GetSuggestedTpLineName(position.Id);
             var textName = GetSuggestedTpTextName(position.Id);
@@ -595,6 +632,551 @@ namespace CTStopBot
         private double ClampValue(double value, double minimum, double maximum)
         {
             return Math.Max(minimum, Math.Min(maximum, value));
+        }
+
+
+        private void UpdatePreTradeGuidance()
+        {
+            try
+            {
+                if (!ShowPreTradeGuidance)
+                {
+                    RemoveAllPreTradeGuideObjects();
+                    return;
+                }
+
+                double signalScore;
+                double atrPrice;
+                double rsi;
+                double spreadToAtr;
+                double momentumScore;
+                string trendText;
+                string momentumText;
+                string volatilityText;
+                bool overextended;
+
+                if (!TryGetMarketSignal(out signalScore, out atrPrice, out rsi, out spreadToAtr,
+                    out momentumScore, out trendText, out momentumText, out volatilityText, out overextended))
+                {
+                    DrawMarketStatus(
+                        "CT-STOPBOT | PRE-ENTRY MAP (M5)\n" +
+                        "STATUS: WAIT — waiting for sufficient closed-candle history or valid quotes.\n" +
+                        "No entry is placed by the cBot. Suggested levels are not active orders.");
+                    return;
+                }
+
+                var spreadOkay = spreadToAtr <= MaxSpreadToAtrRatio;
+                var overallBias = signalScore >= 0.25 ? "BUY LEAN" :
+                    signalScore <= -0.25 ? "SELL LEAN" : "NEUTRAL / MIXED";
+                var overallQuality = !spreadOkay ? "WAIT — SPREAD WIDE" :
+                    overextended ? "WAIT — MOMENTUM EXTENDED" :
+                    Math.Abs(signalScore) < 0.25 ? "WAIT — NO CLEAR ALIGNMENT" :
+                    "DIRECTIONAL ALIGNMENT";
+
+                string buyStatus;
+                string sellStatus;
+                UpdateOneSideGuidance(TradeType.Buy, signalScore, atrPrice, rsi, spreadToAtr,
+                    trendText, momentumText, overextended, out buyStatus);
+                UpdateOneSideGuidance(TradeType.Sell, signalScore, atrPrice, rsi, spreadToAtr,
+                    trendText, momentumText, overextended, out sellStatus);
+
+                var spreadText = spreadOkay ? "OK" : "WIDE / WAIT";
+                var status = string.Format(
+                    "CT-STOPBOT | PRE-ENTRY MAP (M5)\n" +
+                    "Bias: {0} | Alignment index: {1}/100 (heuristic, NOT probability)\n" +
+                    "Trend EMA 9/21/50: {2} | 3-bar momentum: {3} | RSI14: {4:F1}\n" +
+                    "ATR14: {5} | ATR regime: {6} | Spread/ATR: {7:P1} ({8})\n" +
+                    "Market filter: {9}\n" +
+                    "BUY: {10}\n" +
+                    "SELL: {11}\n" +
+                    "Visual guidance only — no entry/TP order is sent.",
+                    overallBias,
+                    (int)Math.Round(50.0 + 50.0 * signalScore),
+                    trendText,
+                    momentumText,
+                    rsi,
+                    atrPrice.ToString("F" + Symbol.Digits),
+                    volatilityText,
+                    spreadToAtr,
+                    spreadText,
+                    overallQuality,
+                    buyStatus,
+                    sellStatus);
+
+                DrawMarketStatus(status);
+            }
+            catch (Exception ex)
+            {
+                // Never allow a drawing/indicator exception to stop the protection loop.
+                Print("WARNING: pre-trade guidance refresh failed; open-position stop management continues. {0}", ex.Message);
+            }
+        }
+
+        private bool TryGetMarketSignal(
+            out double signalScore,
+            out double atrPrice,
+            out double rsi,
+            out double spreadToAtr,
+            out double momentumScore,
+            out string trendText,
+            out string momentumText,
+            out string volatilityText,
+            out bool overextended)
+        {
+            signalScore = 0.0;
+            atrPrice = 0.0;
+            rsi = 50.0;
+            spreadToAtr = 0.0;
+            momentumScore = 0.0;
+            trendText = "UNKNOWN";
+            momentumText = "UNKNOWN";
+            volatilityText = "UNKNOWN";
+            overextended = false;
+
+            if (Symbol.PipSize <= 0 || Symbol.TickSize <= 0 ||
+                Symbol.Bid <= 0 || Symbol.Ask <= 0 || Symbol.Ask < Symbol.Bid)
+                return false;
+
+            var lastClosedIndex = Bars.Count - 2;
+            var minimumBarsRequired = Math.Max(52, Math.Max(TpStructureLookback + 1, AtrPeriod + 2));
+            if (lastClosedIndex < 50 || Bars.Count < minimumBarsRequired)
+                return false;
+
+            atrPrice = _atr != null && lastClosedIndex < _atr.Result.Count
+                ? _atr.Result[lastClosedIndex]
+                : 0.0;
+            rsi = _tpRsi != null && lastClosedIndex < _tpRsi.Result.Count
+                ? _tpRsi.Result[lastClosedIndex]
+                : 50.0;
+
+            if (!IsFinitePositive(atrPrice) || double.IsNaN(rsi) || double.IsInfinity(rsi))
+                return false;
+
+            var fastEma = _tpFastEma.Result[lastClosedIndex];
+            var slowEma = _tpSlowEma.Result[lastClosedIndex];
+            var trendEma = _tpTrendEma.Result[lastClosedIndex];
+            if (!IsFiniteNumber(fastEma) || !IsFiniteNumber(slowEma) || !IsFiniteNumber(trendEma))
+                return false;
+
+            var shortTrendScore = ClampValue(((fastEma - slowEma) / atrPrice) / 0.45, -1.0, 1.0);
+            var longTrendScore = ClampValue(((slowEma - trendEma) / atrPrice) / 0.75, -1.0, 1.0);
+            var trendScore = ClampValue(0.65 * shortTrendScore + 0.35 * longTrendScore, -1.0, 1.0);
+
+            var momentumIndex = Math.Max(0, lastClosedIndex - 3);
+            momentumScore = ClampValue(
+                ((Bars.ClosePrices[lastClosedIndex] - Bars.ClosePrices[momentumIndex]) / atrPrice) / 0.8,
+                -1.0, 1.0);
+
+            var rsiScore = ClampValue((rsi - 50.0) / 20.0, -1.0, 1.0);
+            var candleScore = ClampValue(
+                ((Bars.ClosePrices[lastClosedIndex] - Bars.OpenPrices[lastClosedIndex]) / atrPrice) / 0.5,
+                -1.0, 1.0);
+
+            signalScore = ClampValue(
+                0.40 * trendScore + 0.30 * momentumScore + 0.20 * rsiScore + 0.10 * candleScore,
+                -1.0, 1.0);
+
+            // Penalize very stretched momentum instead of automatically treating an
+            // extreme RSI reading as stronger trend confirmation.
+            if (rsi > 75.0 && signalScore > 0.0)
+            {
+                signalScore = ClampValue(signalScore - Math.Min(0.20, (rsi - 75.0) / 100.0), -1.0, 1.0);
+                overextended = true;
+            }
+            else if (rsi < 25.0 && signalScore < 0.0)
+            {
+                signalScore = ClampValue(signalScore + Math.Min(0.20, (25.0 - rsi) / 100.0), -1.0, 1.0);
+                overextended = true;
+            }
+
+            spreadToAtr = Symbol.Spread / atrPrice;
+            if (!IsFiniteNumber(spreadToAtr) || spreadToAtr < 0.0)
+                return false;
+
+            trendText = trendScore >= 0.25 ? "BULLISH" :
+                trendScore <= -0.25 ? "BEARISH" : "MIXED";
+            momentumText = momentumScore >= 0.20 ? "UP" :
+                momentumScore <= -0.20 ? "DOWN" : "FLAT";
+            
+            var atrSum = 0.0;
+            var atrCount = 0;
+            var firstAtrIndex = Math.Max(0, lastClosedIndex - 19);
+            for (var i = firstAtrIndex; i <= lastClosedIndex; i++)
+            {
+                var value = _atr.Result[i];
+                if (IsFinitePositive(value))
+                {
+                    atrSum += value;
+                    atrCount++;
+                }
+            }
+
+            var averageAtr = atrCount > 0 ? atrSum / atrCount : atrPrice;
+            var atrRatio = averageAtr > 0.0 ? atrPrice / averageAtr : 1.0;
+            volatilityText = atrRatio >= 1.25 ? "HIGH" :
+                atrRatio <= 0.75 ? "LOW" : "NORMAL";
+
+            return true;
+        }
+
+        private void UpdateOneSideGuidance(
+            TradeType tradeType,
+            double signalScore,
+            double atrPrice,
+            double rsi,
+            double spreadToAtr,
+            string trendText,
+            string momentumText,
+            bool overextended,
+            out string sideStatus)
+        {
+            var sideKey = tradeType == TradeType.Buy ? "BUY" : "SELL";
+            var totalPositions = 0;
+            var unprotectedPositions = 0;
+            GetManagedPositionProtectionCounts(tradeType, out totalPositions, out unprotectedPositions);
+
+            double entryPrice;
+            double stopPrice;
+            double targetPrice;
+            double rewardRisk;
+            bool stopIsSafe;
+            string setupContext;
+
+            var calculated = TryCalculateMarketSideGuidance(tradeType, signalScore, atrPrice,
+                out entryPrice, out stopPrice, out targetPrice, out rewardRisk, out stopIsSafe, out setupContext);
+
+            if (totalPositions == 0)
+            {
+                if (!calculated)
+                {
+                    RemoveMarketGuideObject(sideKey + "_SL");
+                    RemoveMarketGuideObject(sideKey + "_TP");
+                    sideStatus = "waiting for valid data";
+                    return;
+                }
+
+                if (stopIsSafe)
+                {
+                    var preTradeStopContext = string.Format(
+                        "pre-entry | align {0}/100 | {1} | {2} | spread/ATR {3:P1}",
+                        (int)Math.Round(50.0 + 50.0 * (tradeType == TradeType.Buy ? signalScore : -signalScore)),
+                        trendText, momentumText, spreadToAtr);
+                    DrawOrUpdateMarketGuide(sideKey + "_SL", tradeType, stopPrice, atrPrice,
+                        "SL IDEA " + sideKey, Color.Yellow, false, preTradeStopContext);
+                }
+                else
+                {
+                    RemoveMarketGuideObject(sideKey + "_SL");
+                }
+
+                if (ShowSuggestedTpLine)
+                {
+                    DrawOrUpdateMarketGuide(sideKey + "_TP", tradeType, targetPrice, atrPrice,
+                        "TP IDEA " + sideKey, tradeType == TradeType.Buy ? Color.Green : Color.Red,
+                        true, setupContext);
+                }
+                else
+                {
+                    RemoveMarketGuideObject(sideKey + "_TP");
+                }
+
+                sideStatus = string.Format("{0}; entry {1}; SL {2}; TP {3}; R:R {4:F2}; {5}",
+                    GetSetupQuality(tradeType, signalScore, spreadToAtr, overextended),
+                    entryPrice.ToString("F" + Symbol.Digits),
+                    stopIsSafe ? stopPrice.ToString("F" + Symbol.Digits) : "UNSAFE / WAIT",
+                    ShowSuggestedTpLine ? targetPrice.ToString("F" + Symbol.Digits) : "hidden",
+                    rewardRisk,
+                    stopIsSafe ? "SL level passes current quote-gap check" : "structure/quote invalidated");
+                return;
+            }
+
+            // The generic idea is not the open position's exact stop. Hide it after
+            // every matching position has real/native protection; when one is still
+            // unprotected, retain the level only with an explicit warning label.
+            RemoveMarketGuideObject(sideKey + "_TP");
+
+            if (unprotectedPositions == 0)
+            {
+                RemoveMarketGuideObject(sideKey + "_SL");
+                sideStatus = string.Format("{0} position(s); protection present; generic SL hidden; per-position TP continues",
+                    totalPositions);
+            }
+            else
+            {
+                if (calculated && stopIsSafe)
+                {
+                    DrawOrUpdateMarketGuide(sideKey + "_SL", tradeType, stopPrice, atrPrice,
+                        "SL IDEA " + sideKey + " — CHECK OPEN POSITION",
+                        Color.Yellow, false, "WARNING: " + unprotectedPositions + " matching position(s) have no SL/native trailing protection");
+                }
+                else
+                {
+                    RemoveMarketGuideObject(sideKey + "_SL");
+                }
+
+                sideStatus = string.Format("WARNING: {0}/{1} position(s) lack SL/native trailing protection; inspect immediately",
+                    unprotectedPositions, totalPositions);
+            }
+        }
+
+        private bool TryCalculateMarketSideGuidance(
+            TradeType tradeType,
+            double signalScore,
+            double atrPrice,
+            out double entryPrice,
+            out double stopPrice,
+            out double targetPrice,
+            out double rewardRisk,
+            out bool stopIsSafe,
+            out string setupContext)
+        {
+            entryPrice = 0.0;
+            stopPrice = 0.0;
+            targetPrice = 0.0;
+            rewardRisk = 0.0;
+            stopIsSafe = false;
+            setupContext = "WAIT";
+
+            var lastClosedIndex = Bars.Count - 2;
+            if (lastClosedIndex < 0 || lastClosedIndex + 1 < SwingLookback ||
+                lastClosedIndex + 1 < TpStructureLookback)
+                return false;
+
+            var direction = tradeType == TradeType.Buy ? 1.0 : -1.0;
+            entryPrice = tradeType == TradeType.Buy ? Symbol.Ask : Symbol.Bid;
+
+            var swingLow = double.MaxValue;
+            var swingHigh = double.MinValue;
+            var firstSwingIndex = lastClosedIndex - SwingLookback + 1;
+            for (var i = firstSwingIndex; i <= lastClosedIndex; i++)
+            {
+                swingLow = Math.Min(swingLow, Bars.LowPrices[i]);
+                swingHigh = Math.Max(swingHigh, Bars.HighPrices[i]);
+            }
+
+            var atrBuffer = atrPrice * InitialAtrBuffer;
+            var spreadBuffer = Math.Max(Symbol.Spread, Symbol.TickSize) * SpreadBufferMultiplier;
+            var minimumBuffer = MinimumWickBufferPips * Symbol.PipSize;
+            var stopBuffer = Math.Max(minimumBuffer, Math.Max(atrBuffer, spreadBuffer));
+            var rawStop = tradeType == TradeType.Buy
+                ? swingLow - stopBuffer
+                : swingHigh + stopBuffer;
+            stopPrice = NormalizeStopPrice(rawStop, tradeType);
+            stopIsSafe = IsSafeRelativeToMarket(stopPrice, tradeType);
+
+            // TP projection combines volatility with the trend/momentum alignment for
+            // this side; a nearby historical barrier can shorten an overly ambitious target.
+            var sideAlignment = ClampValue(direction * signalScore, -1.0, 1.0);
+            var atrMultiplier = ClampValue(TpBaseAtrMultiplier + sideAlignment * TpTrendExtensionAtr, 0.6, 4.0);
+            var minimumTargetDistance = Math.Max(Symbol.TickSize * 3.0,
+                Math.Max(Symbol.Spread * 1.5, atrPrice * 0.35));
+            var projectedDistance = Math.Max(atrPrice * atrMultiplier, minimumTargetDistance);
+            var target = entryPrice + direction * projectedDistance;
+
+            var nearestLevel = tradeType == TradeType.Buy ? double.MaxValue : double.MinValue;
+            var foundLevel = false;
+            var firstStructureIndex = lastClosedIndex - TpStructureLookback + 1;
+            for (var i = firstStructureIndex; i <= lastClosedIndex; i++)
+            {
+                if (tradeType == TradeType.Buy)
+                {
+                    var high = Bars.HighPrices[i];
+                    if (high > entryPrice + minimumTargetDistance && high < nearestLevel)
+                    {
+                        nearestLevel = high;
+                        foundLevel = true;
+                    }
+                }
+                else
+                {
+                    var low = Bars.LowPrices[i];
+                    if (low < entryPrice - minimumTargetDistance && low > nearestLevel)
+                    {
+                        nearestLevel = low;
+                        foundLevel = true;
+                    }
+                }
+            }
+
+            var usedStructure = false;
+            if (foundLevel)
+            {
+                var structureBuffer = Math.Max(Symbol.TickSize * 2.0, Math.Max(Symbol.Spread, atrPrice * 0.05));
+                var structureTarget = nearestLevel - direction * structureBuffer;
+                var structureDistance = direction * (structureTarget - entryPrice);
+                var projectedDistanceFromEntry = direction * (target - entryPrice);
+                if (structureDistance >= minimumTargetDistance &&
+                    structureDistance < projectedDistanceFromEntry)
+                {
+                    target = structureTarget;
+                    usedStructure = true;
+                }
+            }
+
+            targetPrice = NormalizeSuggestedTpPrice(target, tradeType);
+            if (!IsFinitePositive(entryPrice) ||
+                direction * (targetPrice - entryPrice) <= 0.0)
+                return false;
+
+            var riskDistance = Math.Abs(entryPrice - stopPrice);
+            var rewardDistance = Math.Abs(targetPrice - entryPrice);
+            rewardRisk = riskDistance > Symbol.TickSize ? rewardDistance / riskDistance : 0.0;
+
+            var alignmentIndex = (int)Math.Round(50.0 + 50.0 * sideAlignment);
+            var quality = GetSetupQuality(tradeType, signalScore, Symbol.Spread / atrPrice,
+                false);
+            setupContext = string.Format("align {0}/100 | {1} | {2} | R:R {3:F2} | {4}",
+                alignmentIndex,
+                sideAlignment >= 0.35 ? "trend aligned" : sideAlignment <= -0.35 ? "countertrend" : "mixed",
+                usedStructure ? "structure-capped" : "ATR target",
+                rewardRisk,
+                quality);
+            return true;
+        }
+
+        private string GetSetupQuality(TradeType tradeType, double signalScore, double spreadToAtr, bool overextended)
+        {
+            var alignment = tradeType == TradeType.Buy ? signalScore : -signalScore;
+            if (spreadToAtr > MaxSpreadToAtrRatio)
+                return "WAIT — spread/ATR too high";
+            if (overextended)
+                return "WAIT — RSI/momentum stretched";
+            if (alignment >= 0.35)
+                return "FAVORABLE ALIGNMENT (not an entry signal)";
+            if (alignment <= -0.35)
+                return "COUNTER-TREND / WAIT";
+            return "MIXED / WAIT";
+        }
+
+        private void GetManagedPositionProtectionCounts(TradeType tradeType, out int total, out int unprotected)
+        {
+            total = 0;
+            unprotected = 0;
+
+            foreach (var position in Positions)
+            {
+                if (!IsManaged(position) || position.TradeType != tradeType)
+                    continue;
+
+                total++;
+                var hasProtection = position.StopLoss.HasValue ||
+                    position.StopLossBreakEven != null || position.HasTrailingStop;
+                if (!hasProtection)
+                    unprotected++;
+            }
+        }
+
+        private void DrawOrUpdateMarketGuide(
+            string key,
+            TradeType tradeType,
+            double candidatePrice,
+            double atrPrice,
+            string title,
+            Color color,
+            bool isTakeProfit,
+            string context)
+        {
+            double previousPrice;
+            var hasPrevious = _marketGuidePrices.TryGetValue(key, out previousPrice);
+            var targetReached = hasPrevious && isTakeProfit && IsSuggestedTargetReached(previousPrice, tradeType);
+            var displayPrice = candidatePrice;
+            var priceChanged = true;
+
+            if (hasPrevious && !targetReached)
+            {
+                var threshold = Math.Max(GuideMinimumUpdatePips * Symbol.PipSize, atrPrice * GuideMinimumUpdateAtr);
+                if (Math.Abs(candidatePrice - previousPrice) < threshold)
+                {
+                    displayPrice = previousPrice;
+                    priceChanged = false;
+                }
+
+                DateTime lastUpdate;
+                if (priceChanged && GuideUpdateCooldownSeconds > 0 &&
+                    _marketGuideUpdatedAt.TryGetValue(key, out lastUpdate) &&
+                    (Server.Time - lastUpdate).TotalSeconds < GuideUpdateCooldownSeconds)
+                    return;
+            }
+
+            string previousContext;
+            var contextChanged = !_marketGuideContexts.TryGetValue(key, out previousContext) ||
+                !string.Equals(previousContext, context, StringComparison.Ordinal);
+
+            if (hasPrevious && !priceChanged && !contextChanged)
+                return;
+
+            var startTime = Bars.OpenTimes[Bars.Count - 1];
+            var endTime = startTime.AddMinutes(15.0);
+            var lineName = GetMarketGuideLineName(key);
+            var textName = GetMarketGuideTextName(key);
+            var line = Chart.DrawTrendLine(lineName, startTime, displayPrice, endTime, displayPrice, color, 1, LineStyle.Dots);
+            line.ExtendToInfinity = false;
+            var label = Chart.DrawText(textName,
+                string.Format("{0} @ {1} | {2}", title, displayPrice.ToString("F" + Symbol.Digits), context),
+                endTime, displayPrice, color);
+            label.FontSize = 8;
+
+            _marketGuidePrices[key] = displayPrice;
+            _marketGuideContexts[key] = context;
+            if (!hasPrevious || priceChanged || targetReached)
+                _marketGuideUpdatedAt[key] = Server.Time;
+        }
+
+        private void DrawMarketStatus(string status)
+        {
+            if (string.Equals(_lastMarketStatusText, status, StringComparison.Ordinal))
+                return;
+
+            try
+            {
+                var panel = Chart.DrawStaticText("CTSTOPBOT_MARKET_STATUS", status,
+                    VerticalAlignment.Top, HorizontalAlignment.Left, Color.White);
+                panel.FontSize = 10;
+                _lastMarketStatusText = status;
+            }
+            catch (Exception ex)
+            {
+                Print("WARNING: market-condition panel could not be drawn: {0}", ex.Message);
+            }
+        }
+
+        private string GetMarketGuideLineName(string key)
+        {
+            return "CTSTOPBOT_GUIDE_LINE_" + key;
+        }
+
+        private string GetMarketGuideTextName(string key)
+        {
+            return "CTSTOPBOT_GUIDE_TEXT_" + key;
+        }
+
+        private void RemoveMarketGuideObject(string key)
+        {
+            Chart.RemoveObject(GetMarketGuideLineName(key));
+            Chart.RemoveObject(GetMarketGuideTextName(key));
+            _marketGuidePrices.Remove(key);
+            _marketGuideUpdatedAt.Remove(key);
+            _marketGuideContexts.Remove(key);
+        }
+
+        private void RemoveAllPreTradeGuideObjects()
+        {
+            RemoveMarketGuideObject("BUY_SL");
+            RemoveMarketGuideObject("BUY_TP");
+            RemoveMarketGuideObject("SELL_SL");
+            RemoveMarketGuideObject("SELL_TP");
+            Chart.RemoveObject("CTSTOPBOT_MARKET_STATUS");
+            _lastMarketStatusText = string.Empty;
+        }
+
+        private bool IsFiniteNumber(double value)
+        {
+            return !double.IsNaN(value) && !double.IsInfinity(value);
+        }
+
+        private bool IsFinitePositive(double value)
+        {
+            return IsFiniteNumber(value) && value > 0.0;
         }
 
         private bool TryCalculateStructuralStop(Position position, double atrMultiplier, bool allowFallback, out double stopPrice)
