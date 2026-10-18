@@ -319,10 +319,12 @@ namespace CTStopBot
             stopPrice = 0.0;
 
             var lastClosedIndex = Bars.Count - 2;
-            if (lastClosedIndex < 1)
+            if (lastClosedIndex < 0 || lastClosedIndex + 1 < SwingLookback)
                 return false;
 
-            var firstIndex = Math.Max(0, lastClosedIndex - SwingLookback + 1);
+            // Use exactly the configured number of closed candles. Do not silently
+            // reduce the lookback when chart history has not loaded yet.
+            var firstIndex = lastClosedIndex - SwingLookback + 1;
             var swingLow = double.MaxValue;
             var swingHigh = double.MinValue;
 
