@@ -1016,9 +1016,40 @@ namespace CTStopBot
                     RemoveMarketGuideObject(sideKey + "_TP");
                 }
 
-                sideStatus = string.Format("{0} | R:R {1:F1} | risk {2:F2} ATR | {3}",
-                    highConfidence ? "HIGH-CONFIDENCE" : setupQuality,
-                    rewardRisk, stopDistanceAtr, stopIsSafe ? "SL valid" : "SL unsafe");
+                // Final acceptance uses the prices actually retained by the chart objects.
+                // Independent smoothing of ENTRY, SL and TP must never leave a displayed
+                // ratio that differs from the ratio accepted by the setup calculator.
+                double renderedStopPrice;
+                double renderedTargetPrice = targetPrice;
+                double renderedRewardRisk;
+                var hasRenderedStop = _marketGuidePrices.TryGetValue(
+                    sideKey + "_SL", out renderedStopPrice);
+                var hasRenderedTarget = !ShowSuggestedTpLine ||
+                    _marketGuidePrices.TryGetValue(sideKey + "_TP", out renderedTargetPrice);
+                var renderedStopDistanceAtr = atrPrice > 0.0
+                    ? Math.Abs(displayedEntryPrice - renderedStopPrice) / atrPrice
+                    : double.MaxValue;
+                var renderedDirectionalRisk = direction * (displayedEntryPrice - renderedStopPrice);
+                var renderedDirectionalReward = direction * (renderedTargetPrice - displayedEntryPrice);
+                if (!hasRenderedStop || !hasRenderedTarget ||
+                    renderedDirectionalRisk < minimumStructuralRisk ||
+                    renderedDirectionalReward <= Math.Max(Symbol.TickSize * 2.0, Symbol.Spread * 1.5) ||
+                    renderedStopDistanceAtr < MinimumQualityStopDistanceAtr ||
+                    renderedStopDistanceAtr > Math.Min(MaximumQualityStopDistanceAtr, MaximumPreTradeStopDistanceAtr) ||
+                    !TryGetCostAdjustedRewardRisk(displayedEntryPrice, renderedStopPrice,
+                        renderedTargetPrice, tradeType, out renderedRewardRisk))
+                {
+                    RemoveMarketGuideObject(sideKey + "_ENTRY");
+                    RemoveMarketGuideObject(sideKey + "_SL");
+                    RemoveMarketGuideObject(sideKey + "_TP");
+                    sideStatus = "WAIT — displayed ENTRY/SL/TP levels fail risk/reward geometry";
+                    return;
+                }
+
+                rewardRisk = renderedRewardRisk;
+                stopDistanceAtr = renderedStopDistanceAtr;
+                sideStatus = string.Format("QUALIFIED | net R:R {0:F2} | risk {1:F2} ATR | displayed prices validated",
+                    rewardRisk, stopDistanceAtr);
                 return;
             }
 
