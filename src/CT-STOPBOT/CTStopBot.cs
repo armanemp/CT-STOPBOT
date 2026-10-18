@@ -705,6 +705,12 @@ namespace CTStopBot
                     context += "/RRLOW";
                 }
             }
+            else
+            {
+                // Do not imply this TP is 1.8R when an already-protected position's
+                // original risk cannot be recovered from trusted persisted state.
+                context += "/R_UNKNOWN";
+            }
 
             return IsFinitePositive(targetPrice);
         }
@@ -763,14 +769,17 @@ namespace CTStopBot
 
             var targetIsLowRr = context != null &&
                 context.IndexOf("/RRLOW", StringComparison.Ordinal) >= 0;
-            var targetLabel = targetIsLowRr ? "TP!" : "TP";
-            var ratioText = string.Empty;
+            var targetRiskUnknown = context != null &&
+                context.IndexOf("/R_UNKNOWN", StringComparison.Ordinal) >= 0;
+            var targetLabel = targetIsLowRr || targetRiskUnknown ? "TP!" : "TP";
+            var ratioText = targetRiskUnknown ? " | R:R n/a" : string.Empty;
             double originalRisk;
             double netRewardRisk;
             var costReserve = Math.Max(Symbol.Spread, Symbol.TickSize)
                 + SlippageReservePips * Symbol.PipSize;
             var direction = position.TradeType == TradeType.Buy ? 1.0 : -1.0;
-            if (_initialRiskPriceByPosition.TryGetValue(position.Id, out originalRisk) &&
+            if (!targetRiskUnknown &&
+                _initialRiskPriceByPosition.TryGetValue(position.Id, out originalRisk) &&
                 RiskRewardEngine.TryCalculateNetRewardRisk(
                     originalRisk, direction * (targetPrice - position.EntryPrice),
                     costReserve, out netRewardRisk))
@@ -1105,7 +1114,9 @@ namespace CTStopBot
                 var displayedTargetOnCorrectSide = ShowSuggestedTpLine &&
                     displayedDirectionalReward > minimumVisibleTargetDistance;
                 var displayedRiskOnCorrectSide = displayedDirectionalRisk >= minimumStructuralRisk;
-                var displayedStopIsSafe = stopIsSafe && displayedRiskOnCorrectSide;
+                var displayedStopIsSafe = stopIsSafe &&
+                    IsSafeRelativeToMarket(displayedStopPrice, tradeType) &&
+                    displayedRiskOnCorrectSide;
                 var displayedStopDistanceIsValid =
                     displayedStopDistanceAtr >= MinimumQualityStopDistanceAtr &&
                     displayedStopDistanceAtr <= maximumAllowedStopDistanceAtr;
@@ -1125,7 +1136,8 @@ namespace CTStopBot
                 var targetColor = renderedHighConfidence
                     ? Color.FromHex("#55B79E") : Color.FromHex("#438D7F");
 
-                var stopTitle = sideKey + (displayedStopIsSafe ? " SL" : " SL!");
+                var stopTitle = sideKey +
+                    (displayedStopIsSafe && displayedStopDistanceIsValid ? " SL" : " SL!");
                 var targetTitle = sideKey + (displayedRewardRiskIsValid ? " TP" : " TP!");
 
                 DrawOrUpdateMarketGuide(sideKey + "_ENTRY", tradeType, entryPrice,
