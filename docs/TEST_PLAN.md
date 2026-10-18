@@ -69,8 +69,10 @@ Do not skip these tests before live use. Record the broker, account type, symbol
 ## Pre-entry guidance and position handover
 
 - [ ] Start with no positions and sufficient M5 history; confirm BUY and SELL each draw separate ENTRY, SL and TP horizontal guide lines.
-- [ ] Confirm no verbose static market panel remains, and each line label contains only its short name plus distance in pips.
-- [ ] Measure the label location: it should remain 40 M5 candles to the right of the latest bar and move forward as new bars form.
+- [ ] Confirm all ENTRY, SL and TP price lines are visible as horizontal lines across the chart at their respective price levels.
+- [ ] Confirm no verbose static market panel remains, and each line label contains only its short name plus distance in pips; no entry, TP or SL price number and no per-position ID appears.
+- [ ] Confirm the chart automatically exposes right-side blank space on start and places labels 40 M5 bars after the latest candle, not on or directly beside the candles.
+- [ ] As each new M5 candle forms, confirm the chart remains shifted enough to keep the labels 40 bars ahead.
 - [ ] Confirm labels use a larger, thin/light font and the dark coordinated palette; line labels should not display extra context, prices, or explanations.
 - [ ] Confirm a high-confidence setup gets a thicker gold ENTRY line with a star, while ordinary entry suggestions are subdued and dotted.
 - [ ] Confirm ENTRY is a conditional breakout level at a confirmed swing high/low with an ATR/spread buffer, not simply the current Ask/Bid.
