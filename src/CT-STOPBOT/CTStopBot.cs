@@ -206,6 +206,16 @@ namespace CTStopBot
             if (!IsManaged(position))
                 return;
 
+            if (position.StopLossBreakEven != null)
+            {
+                // The pinned cTrader.Automate package does not expose the overload
+                // required to atomically preserve native break-even rules while
+                // changing the absolute SL. Leave these positions untouched.
+                NotifyThrottled(position.Id,
+                    "Position has a native server-side break-even rule. This API version cannot preserve that rule atomically while changing SL, so CT-STOPBOT is leaving the position untouched.");
+                return;
+            }
+
             if (position.HasTrailingStop && !ManagePositionsWithServerTrailing)
             {
                 NotifyThrottled(position.Id,
@@ -524,9 +534,10 @@ namespace CTStopBot
 
             // Preserve the position's existing server-side trailing-stop flag and
             // stop trigger method while changing only the absolute stop price.
+            // Native server-side break-even positions are skipped above because the
+            // pinned Automate API has no compatible overload to preserve that rule.
             var result = ModifyPosition(position, stopPrice, position.TakeProfit,
-                ProtectionType.Absolute, position.HasTrailingStop, position.StopLossTriggerMethod,
-                position.StopLossBreakEven);
+                ProtectionType.Absolute, position.HasTrailingStop, position.StopLossTriggerMethod);
 
             if (result.IsSuccessful)
             {
