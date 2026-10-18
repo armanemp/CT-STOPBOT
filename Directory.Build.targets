@@ -1,0 +1,18 @@
+<Project>
+  <!--
+    cTrader.Automate derives the .algo package name from directory metadata
+    before the normal AlgoName property is consistently applied in some builds.
+    Set the project folder and output metadata immediately before extraction so
+    the .algo and its metadata use the project name, CT-STOPBOT.
+  -->
+  <Target Name="FixAlgoMetadata" BeforeTargets="_ExtractMetadata">
+    <PropertyGroup>
+      <_AlgoDirectoryPath>$(MSBuildProjectDirectory)</_AlgoDirectoryPath>
+      <_AlgoRootDirectoryName>$([System.IO.Path]::GetFileName($(_AlgoDirectoryPath)))</_AlgoRootDirectoryName>
+      <_AlgoFileName>$(AlgoName).algo</_AlgoFileName>
+      <_AlgoFilePath>$(OutDir)$(_AlgoFileName)</_AlgoFilePath>
+      <_AlgoMetadataFileName>$(_AlgoFileName).metadata</_AlgoMetadataFileName>
+      <_AlgoMetadataFilePath>$(OutDir)$(_AlgoMetadataFileName)</_AlgoMetadataFilePath>
+    </PropertyGroup>
+  </Target>
+</Project>
