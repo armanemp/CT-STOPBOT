@@ -66,6 +66,21 @@ Do not skip these tests before live use. Record the broker, account type, symbol
 - [ ] Disable the suggested TP line; confirm the drawings are removed and no TP order is changed.
 - [ ] Close a position and stop the cBot; confirm the corresponding drawings are removed.
 
+## Pre-entry guidance and position handover
+
+- [ ] Start the cBot with no positions and sufficient M5 history; confirm the BUY and SELL SL/TP proposal lines and condition panel appear.
+- [ ] Confirm the panel reports EMA 9/21/50 trend, three-bar momentum, RSI, ATR regime, spread/ATR quality and an alignment index marked as heuristic rather than probability.
+- [ ] Verify the lines are chart-only; no position/order is created and no active stop is implied by a proposed line.
+- [ ] During small quote/spread fluctuations, verify proposal lines stay stable; after a meaningful price/structure change, verify they update within the configured threshold/cooldown rules.
+- [ ] Observe the TP proposal being reached; confirm the next forward TP objective is calculated without creating/changing an actual TP order.
+- [ ] Open a manual BUY without an SL; confirm the matching pre-trade SL proposal remains while the position lacks protection and the panel warns if protection is not installed.
+- [ ] After the actual SL appears on the position, confirm the generic BUY SL proposal disappears; confirm the live position-specific TP line remains and continues updating.
+- [ ] Repeat for SELL and both directions simultaneously.
+- [ ] If the broker rejects the initial SL, confirm the cBot does not hide the SL proposal as if protection had succeeded and that the warning is visible.
+- [ ] Open multiple positions on one side; confirm the generic SL proposal is hidden only when all same-side matching positions show SL/native trailing/native BE protection, and each open position retains its own TP line.
+- [ ] Close all positions in one direction; confirm the pre-entry scenario for that side becomes available again.
+- [ ] Disable pre-trade guidance and confirm its lines/panel are removed; verify independent per-position TP behavior follows the TP display toggle.
+
 ## Resilience
 
 - [ ] Check log output on broker rejection and ensure it never claims a failed stop was set.
