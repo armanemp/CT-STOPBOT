@@ -29,6 +29,27 @@ namespace CTStopBot
         [Parameter("Manage positions with server-side trailing", DefaultValue = false)]
         public bool ManagePositionsWithServerTrailing { get; set; }
 
+        [Parameter("Show suggested TP line (visual only)", DefaultValue = true)]
+        public bool ShowSuggestedTpLine { get; set; }
+
+        [Parameter("TP structure lookback (closed M5 candles)", DefaultValue = 30, MinValue = 5, MaxValue = 200)]
+        public int TpStructureLookback { get; set; }
+
+        [Parameter("TP base ATR multiplier", DefaultValue = 1.4, MinValue = 0.5, MaxValue = 5.0)]
+        public double TpBaseAtrMultiplier { get; set; }
+
+        [Parameter("TP trend extension ATR", DefaultValue = 0.8, MinValue = 0.0, MaxValue = 3.0)]
+        public double TpTrendExtensionAtr { get; set; }
+
+        [Parameter("TP minimum update move (ATR)", DefaultValue = 0.15, MinValue = 0.01, MaxValue = 2.0)]
+        public double TpMinimumUpdateAtr { get; set; }
+
+        [Parameter("TP minimum update move (pips)", DefaultValue = 3.0, MinValue = 0.1, MaxValue = 100.0)]
+        public double TpMinimumUpdatePips { get; set; }
+
+        [Parameter("TP update cooldown (seconds)", DefaultValue = 2, MinValue = 0, MaxValue = 30)]
+        public int TpUpdateCooldownSeconds { get; set; }
+
         [Parameter("Swing lookback (closed M5 candles)", DefaultValue = 5, MinValue = 2, MaxValue = 50)]
         public int SwingLookback { get; set; }
 
@@ -81,9 +102,15 @@ namespace CTStopBot
         public int MaximumRetryCooldownSeconds { get; set; }
 
         private AverageTrueRange _atr;
+        private ExponentialMovingAverage _tpFastEma;
+        private ExponentialMovingAverage _tpSlowEma;
+        private RelativeStrengthIndex _tpRsi;
         private readonly Dictionary<int, DateTime> _lastAttemptAt = new Dictionary<int, DateTime>();
         private readonly Dictionary<int, DateTime> _lastNoticeAt = new Dictionary<int, DateTime>();
         private readonly Dictionary<int, int> _failureCounts = new Dictionary<int, int>();
+        private readonly Dictionary<int, double> _suggestedTpPrices = new Dictionary<int, double>();
+        private readonly Dictionary<int, DateTime> _suggestedTpUpdatedAt = new Dictionary<int, DateTime>();
+        private readonly Dictionary<int, string> _suggestedTpContexts = new Dictionary<int, string>();
 
         protected override void OnStart()
         {
@@ -114,6 +141,9 @@ namespace CTStopBot
                 Print("WARNING: Symbol.PipValue is not positive; cost-aware break-even will be unavailable until the symbol/account metadata provides a valid value.");
 
             _atr = Indicators.AverageTrueRange(Bars, AtrPeriod, MovingAverageType.Simple);
+            _tpFastEma = Indicators.ExponentialMovingAverage(Bars.ClosePrices, 9);
+            _tpSlowEma = Indicators.ExponentialMovingAverage(Bars.ClosePrices, 21);
+            _tpRsi = Indicators.RelativeStrengthIndex(Bars.ClosePrices, 14);
 
             Positions.Opened += OnPositionOpened;
             Positions.Closed += OnPositionClosed;
@@ -126,6 +156,8 @@ namespace CTStopBot
                 Symbol.Bid, Symbol.Ask, spreadPips, Symbol.PipSize, Symbol.TickSize, Symbol.PipValue, Symbol.MinStopLossDistance, minDistanceUnit);
             Print("Management switches: initial stop={0}, break-even={1}, structure trailing={2}, manage native trailing positions={3}, label filter={4}.",
                 EnableInitialStopPlacement, EnableBreakEven, EnableStructureTrailing, ManagePositionsWithServerTrailing, RestrictToLabel);
+            Print("Suggested TP line: enabled={0} (visual only; the cBot never creates or changes a take-profit order).",
+                ShowSuggestedTpLine);
 
             // Protect eligible positions that were already open when the cBot started.
             foreach (var position in Positions)
@@ -149,6 +181,9 @@ namespace CTStopBot
         {
             Positions.Opened -= OnPositionOpened;
             Positions.Closed -= OnPositionClosed;
+
+            foreach (var positionId in new List<int>(_suggestedTpPrices.Keys))
+                RemoveSuggestedTpObjects(positionId);
         }
 
         private void OnPositionOpened(PositionOpenedEventArgs args)
@@ -163,6 +198,7 @@ namespace CTStopBot
             _lastAttemptAt.Remove(args.Position.Id);
             _lastNoticeAt.Remove(args.Position.Id);
             _failureCounts.Remove(args.Position.Id);
+            RemoveSuggestedTpObjects(args.Position.Id);
         }
 
         private void ManageAllPositions()
@@ -205,6 +241,10 @@ namespace CTStopBot
         {
             if (!IsManaged(position))
                 return;
+
+            // This chart-only recommendation is independent of stop management and
+            // is evaluated even when a position uses a native server-side stop rule.
+            UpdateSuggestedTakeProfit(position);
 
             if (position.StopLossBreakEven != null)
             {
@@ -315,6 +355,244 @@ namespace CTStopBot
                 return;
 
             TryModifyStop(position, bestStop, false, improvementThreshold, reason);
+        }
+
+
+        private void UpdateSuggestedTakeProfit(Position position)
+        {
+            try
+            {
+                if (!ShowSuggestedTpLine)
+                {
+                    RemoveSuggestedTpObjects(position.Id);
+                    return;
+                }
+
+                double candidate;
+                double atrPrice;
+                string context;
+                if (!TryCalculateSuggestedTakeProfit(position, out candidate, out atrPrice, out context))
+                {
+                    RemoveSuggestedTpObjects(position.Id);
+                    NotifyThrottled(position.Id,
+                        "Suggested TP line is waiting for valid M5 history/market data. No take-profit order was changed.");
+                    return;
+                }
+
+                double previousPrice;
+                var hasPrevious = _suggestedTpPrices.TryGetValue(position.Id, out previousPrice);
+                var targetWasReached = hasPrevious && IsSuggestedTargetReached(previousPrice, position.TradeType);
+
+                if (hasPrevious && !targetWasReached)
+                {
+                    var minimumMove = Math.Max(TpMinimumUpdatePips * Symbol.PipSize, atrPrice * TpMinimumUpdateAtr);
+                    var movement = Math.Abs(candidate - previousPrice);
+
+                    // Keep the price stable through small quote/indicator noise. A change
+                    // in the market regime may update the label without moving the line.
+                    if (movement < minimumMove)
+                    {
+                        string previousContext;
+                        if (!_suggestedTpContexts.TryGetValue(position.Id, out previousContext) ||
+                            !string.Equals(previousContext, context, StringComparison.Ordinal))
+                        {
+                            DrawSuggestedTpObjects(position, previousPrice, context);
+                            _suggestedTpContexts[position.Id] = context;
+                        }
+
+                        return;
+                    }
+
+                    DateTime lastUpdate;
+                    if (TpUpdateCooldownSeconds > 0 &&
+                        _suggestedTpUpdatedAt.TryGetValue(position.Id, out lastUpdate) &&
+                        (Server.Time - lastUpdate).TotalSeconds < TpUpdateCooldownSeconds)
+                        return;
+                }
+
+                DrawSuggestedTpObjects(position, candidate, context);
+                _suggestedTpPrices[position.Id] = candidate;
+                _suggestedTpUpdatedAt[position.Id] = Server.Time;
+                _suggestedTpContexts[position.Id] = context;
+            }
+            catch (Exception ex)
+            {
+                // A chart-drawing failure must never prevent the independent SL manager
+                // from running for this position.
+                NotifyThrottled(position.Id, "Suggested TP drawing failed; stop management continues. Details: " + ex.Message);
+            }
+        }
+
+        private bool TryCalculateSuggestedTakeProfit(Position position, out double targetPrice, out double atrPrice, out string context)
+        {
+            targetPrice = 0.0;
+            atrPrice = 0.0;
+            context = "MIXED";
+
+            if (Symbol.PipSize <= 0 || Symbol.TickSize <= 0 ||
+                Symbol.Bid <= 0 || Symbol.Ask <= 0 || Symbol.Ask < Symbol.Bid)
+                return false;
+
+            var lastClosedIndex = Bars.Count - 2;
+            var minimumBarsRequired = Math.Max(TpStructureLookback + 1, Math.Max(AtrPeriod + 2, 23));
+            if (lastClosedIndex < 3 || Bars.Count < minimumBarsRequired)
+                return false;
+
+            atrPrice = _atr != null && lastClosedIndex < _atr.Result.Count
+                ? _atr.Result[lastClosedIndex]
+                : 0.0;
+            if (double.IsNaN(atrPrice) || double.IsInfinity(atrPrice) || atrPrice <= 0.0)
+                return false;
+
+            var fastEma = _tpFastEma.Result[lastClosedIndex];
+            var slowEma = _tpSlowEma.Result[lastClosedIndex];
+            var rsi = _tpRsi.Result[lastClosedIndex];
+            if (double.IsNaN(fastEma) || double.IsInfinity(fastEma) ||
+                double.IsNaN(slowEma) || double.IsInfinity(slowEma) ||
+                double.IsNaN(rsi) || double.IsInfinity(rsi))
+                return false;
+
+            // The TP distance is anchored to entry so the line does not chase every tick.
+            // Only after price reaches/passes that level do we propose a fresh forward target.
+            var direction = position.TradeType == TradeType.Buy ? 1.0 : -1.0;
+            var referencePrice = position.TradeType == TradeType.Buy ? Symbol.Bid : Symbol.Ask;
+
+            // Combine trend (EMA 9/21), three-closed-bar momentum and RSI. All inputs use
+            // closed candles only, preventing the signal itself from repainting every tick.
+            var momentumIndex = Math.Max(0, lastClosedIndex - 3);
+            var trendScore = ClampValue(((fastEma - slowEma) / atrPrice) / 0.45, -1.0, 1.0);
+            var momentumScore = ClampValue(((Bars.ClosePrices[lastClosedIndex] - Bars.ClosePrices[momentumIndex]) / atrPrice) / 0.8, -1.0, 1.0);
+            var rsiScore = ClampValue((rsi - 50.0) / 20.0, -1.0, 1.0);
+            var directionalScore = ClampValue(direction * (0.45 * trendScore + 0.35 * momentumScore + 0.20 * rsiScore), -1.0, 1.0);
+
+            var atrMultiplier = ClampValue(TpBaseAtrMultiplier + directionalScore * TpTrendExtensionAtr, 0.6, 4.0);
+            var minimumTargetDistance = Math.Max(Symbol.TickSize * 3.0,
+                Math.Max(Symbol.Spread * 1.5, atrPrice * 0.35));
+            var projectedDistance = Math.Max(atrPrice * atrMultiplier, minimumTargetDistance);
+            var target = position.EntryPrice + direction * projectedDistance;
+            var extendedAfterTarget = false;
+
+            // If the entry-based target has already been reached, suggest the next
+            // forward objective instead of leaving a stale line behind market price.
+            if (direction * (target - referencePrice) <= minimumTargetDistance)
+            {
+                target = referencePrice + direction * projectedDistance;
+                extendedAfterTarget = true;
+            }
+
+            // Cap a farther ATR projection at the nearest relevant recent resistance/support,
+            // with a small buffer before that level. Ignore levels that are too close to price.
+            var firstIndex = lastClosedIndex - TpStructureLookback + 1;
+            var nearestLevel = position.TradeType == TradeType.Buy ? double.MaxValue : double.MinValue;
+            var foundLevel = false;
+            for (var i = firstIndex; i <= lastClosedIndex; i++)
+            {
+                if (position.TradeType == TradeType.Buy)
+                {
+                    var high = Bars.HighPrices[i];
+                    if (high > referencePrice + minimumTargetDistance && high < nearestLevel)
+                    {
+                        nearestLevel = high;
+                        foundLevel = true;
+                    }
+                }
+                else
+                {
+                    var low = Bars.LowPrices[i];
+                    if (low < referencePrice - minimumTargetDistance && low > nearestLevel)
+                    {
+                        nearestLevel = low;
+                        foundLevel = true;
+                    }
+                }
+            }
+
+            var usedStructure = false;
+            if (foundLevel)
+            {
+                var structureBuffer = Math.Max(Symbol.TickSize * 2.0, Math.Max(Symbol.Spread, atrPrice * 0.05));
+                var structureTarget = nearestLevel - direction * structureBuffer;
+                var structureDistance = direction * (structureTarget - referencePrice);
+                var projectedDistanceFromMarket = direction * (target - referencePrice);
+
+                if (structureDistance >= minimumTargetDistance &&
+                    structureDistance < projectedDistanceFromMarket)
+                {
+                    target = structureTarget;
+                    usedStructure = true;
+                }
+            }
+
+            targetPrice = NormalizeSuggestedTpPrice(target, position.TradeType);
+
+            // A final direction check guards against rounding or a rapidly moving quote.
+            if (direction * (targetPrice - referencePrice) <= 0.0)
+                return false;
+
+            var alignment = directionalScore >= 0.35 ? "ALIGNED" :
+                directionalScore <= -0.35 ? "COUNTER" : "MIXED";
+            context = alignment + (usedStructure ? "/STRUCTURE" : "/ATR") +
+                (extendedAfterTarget ? "/NEXT" : string.Empty);
+            return !double.IsNaN(targetPrice) && !double.IsInfinity(targetPrice);
+        }
+
+        private double NormalizeSuggestedTpPrice(double price, TradeType tradeType)
+        {
+            if (Symbol.TickSize <= 0)
+                return Math.Round(price, Symbol.Digits, MidpointRounding.AwayFromZero);
+
+            // Suggested take profit is rounded outward in the trade's profit direction.
+            var ticks = price / Symbol.TickSize;
+            var normalized = tradeType == TradeType.Buy
+                ? Math.Ceiling(ticks - 1e-10) * Symbol.TickSize
+                : Math.Floor(ticks + 1e-10) * Symbol.TickSize;
+            return Math.Round(normalized, Symbol.Digits, MidpointRounding.AwayFromZero);
+        }
+
+        private void DrawSuggestedTpObjects(Position position, double targetPrice, string context)
+        {
+            var startTime = Bars.OpenTimes[Bars.Count - 1];
+            var endTime = startTime.AddMinutes(15.0);
+            var color = position.TradeType == TradeType.Buy ? Color.Green : Color.Red;
+            var lineName = GetSuggestedTpLineName(position.Id);
+            var textName = GetSuggestedTpTextName(position.Id);
+            var line = Chart.DrawTrendLine(lineName, startTime, targetPrice, endTime, targetPrice, color, 1, LineStyle.Dots);
+            line.ExtendToInfinity = false;
+            var label = Chart.DrawText(textName,
+                string.Format("TP IDEA #{0} {1} [{2}]", position.Id, targetPrice.ToString("F" + Symbol.Digits), context),
+                endTime, targetPrice, color);
+            label.FontSize = 8;
+        }
+
+        private bool IsSuggestedTargetReached(double targetPrice, TradeType tradeType)
+        {
+            return tradeType == TradeType.Buy
+                ? Symbol.Bid >= targetPrice
+                : Symbol.Ask <= targetPrice;
+        }
+
+        private string GetSuggestedTpLineName(int positionId)
+        {
+            return "CTSTOPBOT_TP_LINE_" + positionId;
+        }
+
+        private string GetSuggestedTpTextName(int positionId)
+        {
+            return "CTSTOPBOT_TP_TEXT_" + positionId;
+        }
+
+        private void RemoveSuggestedTpObjects(int positionId)
+        {
+            Chart.RemoveObject(GetSuggestedTpLineName(positionId));
+            Chart.RemoveObject(GetSuggestedTpTextName(positionId));
+            _suggestedTpPrices.Remove(positionId);
+            _suggestedTpUpdatedAt.Remove(positionId);
+            _suggestedTpContexts.Remove(positionId);
+        }
+
+        private double ClampValue(double value, double minimum, double maximum)
+        {
+            return Math.Max(minimum, Math.Min(maximum, value));
         }
 
         private bool TryCalculateStructuralStop(Position position, double atrMultiplier, bool allowFallback, out double stopPrice)
