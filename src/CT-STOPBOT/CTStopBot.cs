@@ -684,8 +684,10 @@ namespace CTStopBot
                 if (position.StopLoss.HasValue && IsStopStillOnLossSide(position))
                 {
                     double structureRewardRisk;
+                    var normalizedStructureTarget = NormalizeTargetBeforeStructureBarrier(
+                        structureTarget, position.TradeType);
                     structurePreservesRiskReward = TryGetCostAdjustedRewardRisk(
-                        position.EntryPrice, position.StopLoss.Value, structureTarget,
+                        position.EntryPrice, position.StopLoss.Value, normalizedStructureTarget,
                         position.TradeType, out structureRewardRisk);
                 }
 
@@ -698,7 +700,9 @@ namespace CTStopBot
                 }
             }
 
-            targetPrice = NormalizeSuggestedTpPrice(target, position.TradeType);
+            targetPrice = usedStructure
+                ? NormalizeTargetBeforeStructureBarrier(target, position.TradeType)
+                : NormalizeSuggestedTpPrice(target, position.TradeType);
 
             // A final direction check guards against rounding or a rapidly moving quote.
             if (direction * (targetPrice - referencePrice) <= 0.0)
@@ -1346,8 +1350,10 @@ namespace CTStopBot
                 var structureDistance = direction * (structureTarget - entryPrice);
                 var projectedDistanceFromEntry = direction * (target - entryPrice);
                 double structureRewardRisk;
+                var normalizedStructureTarget = NormalizeTargetBeforeStructureBarrier(
+                    structureTarget, tradeType);
                 var structurePreservesRiskReward = TryGetCostAdjustedRewardRisk(
-                    entryPrice, stopPrice, structureTarget, tradeType, out structureRewardRisk);
+                    entryPrice, stopPrice, normalizedStructureTarget, tradeType, out structureRewardRisk);
 
                 if (structureDistance >= minimumTargetDistance &&
                     structureDistance < projectedDistanceFromEntry &&
