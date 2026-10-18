@@ -4,7 +4,7 @@
 
 The bot manages existing positions; it does not create entries or change position volume. It is deliberately restricted to an M5 chart and a symbol containing the configured string (default XAUUSD). A broker may call Gold GOLD, XAUUSD., or another alias; adjust the symbol filter only after confirming the correct instrument.
 
-By default it manages all position labels on that symbol, including manual positions. Enable the label restriction when only a particular strategy's positions should be touched. Use the feature switches to isolate initial-stop, break-even and structure-trailing behaviour during demo tests. Positions already using cTrader's server-side trailing stop are skipped by default to avoid competing stop managers; enabling management for these positions requires a dedicated test. Positions with a native server-side break-even rule are always skipped because the pinned API package does not offer a compatible atomic overload for preserving that rule during an SL update.
+By default it considers all position labels on the chart symbol, including manual positions; other cBots using the same symbol can also be affected. Enable the label restriction only after verifying the exact label used by the positions you want to manage. Use the feature switches to isolate initial-stop, break-even and structure-trailing behaviour during demo tests. Positions already using cTrader's server-side trailing stop are skipped by default to avoid competing stop managers; enabling management for these positions requires a dedicated test. The current stop-modification path uses the legacy absolute-protection overload, so positions with a native server-side break-even rule are skipped until the newer typed overload is verified against the pinned package and tested.
 
 ## Initial stop
 
@@ -44,6 +44,14 @@ The bot uses the same closed-candle swing method with a separate ATR multiplier.
 By default, positions whose `HasTrailingStop` flag is already true are left untouched. This prevents the bot from competing with cTrader's server-side trailing engine. The modification call also preserves an eligible position's existing trailing flag and stop trigger method.
 
 One stop modification is attempted per position at a time. Failed changes are logged; retries are throttled. The cBot does not guarantee continuous server-side protection while a change is pending or rejected.
+
+## Suggested TP visualization (advisory only)
+
+The TP line is separate from stop management and does not open trades or modify `Position.TakeProfit`. Each eligible open position receives its own chart object named by position ID; Buy suggestions are green and Sell suggestions are red. The short dotted segment and label are removed when that position closes or when the cBot stops.
+
+The recommendation uses the last **closed** M5 candle for EMA 9/21 trend, close-to-close momentum over three bars, and RSI 14. A directional score changes an ATR-based distance. The initial candidate is anchored to the position entry, so it does not chase every tick. A nearby historical high (Buy resistance) or low (Sell support) can cap the target after a small buffer. If the market reaches/passes the target, a new forward objective is calculated. These historical extrema are only simple reference levels, not confirmed multi-timeframe structure.
+
+To avoid visual jitter, a price update requires at least the larger of the configured ATR fraction and pip threshold, and it is throttled by the update cooldown. Crossing the old target forces a refresh. The line is an informational scenario only: it is not an actual TP order, does not account for every future spread/commission/execution change, and does not guarantee that a market path will reach it.
 
 ## Broker-specific constraints to confirm
 
