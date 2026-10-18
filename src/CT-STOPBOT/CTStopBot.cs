@@ -863,6 +863,20 @@ namespace CTStopBot
                 out entryPrice, out stopPrice, out targetPrice, out rewardRisk,
                 out stopDistanceAtr, out stopIsSafe, out stopUsesPivot, out setupContext);
 
+            var setupQuality = GetSetupQuality(tradeType, signalScore, spreadToAtr, overextended);
+            if (calculated)
+            {
+                if (!stopIsSafe)
+                    setupQuality = "WAIT — SL invalid at current quote/broker gap";
+                else if (stopDistanceAtr > MaximumPreTradeStopDistanceAtr)
+                    setupQuality = "WAIT — structural SL too wide";
+                else if (rewardRisk < MinimumPreTradeRewardRisk)
+                    setupQuality = "WAIT — reward/risk below filter";
+                else if ((tradeType == TradeType.Buy && trendText == "BEARISH" && momentumText == "DOWN") ||
+                         (tradeType == TradeType.Sell && trendText == "BULLISH" && momentumText == "UP"))
+                    setupQuality = "WAIT — trend and momentum oppose this side";
+            }
+
             if (totalPositions == 0)
             {
                 if (!calculated)
@@ -879,7 +893,7 @@ namespace CTStopBot
                         "pre-entry | {0} | risk {1:F2} ATR | {2} | align {3}/100 | {4}/{5} | spread/ATR {6:P1}",
                         stopUsesPivot ? "confirmed pivot" : "range fallback",
                         stopDistanceAtr,
-                        GetSetupQuality(tradeType, signalScore, spreadToAtr, overextended),
+                        setupQuality,
                         (int)Math.Round(50.0 + 50.0 * (tradeType == TradeType.Buy ? signalScore : -signalScore)),
                         trendText, momentumText, spreadToAtr);
                     DrawOrUpdateMarketGuide(sideKey + "_SL", tradeType, stopPrice, atrPrice,
@@ -902,7 +916,7 @@ namespace CTStopBot
                 }
 
                 sideStatus = string.Format("{0} | R:R {1:F1} | risk {2:F2} ATR | SL {3} | {4}",
-                    GetSetupQuality(tradeType, signalScore, spreadToAtr, overextended),
+                    setupQuality,
                     rewardRisk,
                     stopDistanceAtr,
                     stopIsSafe ? "candidate valid" : "UNSAFE / WAIT",
