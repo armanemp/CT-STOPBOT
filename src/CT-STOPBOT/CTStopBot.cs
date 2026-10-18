@@ -153,7 +153,52 @@ namespace CTStopBot
         [Parameter("Maximum retry cooldown (seconds)", DefaultValue = 60, MinValue = 2, MaxValue = 600)]
         public int MaximumRetryCooldownSeconds { get; set; }
 
+        [Parameter("Smart enhancements", DefaultValue = true)]
+        public bool EnableSmartEnhancements { get; set; }
+
+        [Parameter("Spread floor (XAU price units)", DefaultValue = 0.22, MinValue = 0.0, MaxValue = 100.0)]
+        public double SpreadFloorPrice { get; set; }
+
+        [Parameter("Minimum quote-to-stop distance (x effective spread)", DefaultValue = 1.10, MinValue = 1.0, MaxValue = 10.0)]
+        public double MinimumQuoteToStopSpreadMultiplier { get; set; }
+
+        [Parameter("Spread-spike guard multiplier (0=off)", DefaultValue = 2.5, MinValue = 0.0, MaxValue = 20.0)]
+        public double SpreadSpikeMultiple { get; set; }
+
+        [Parameter("Volatility scale minimum", DefaultValue = 0.85, MinValue = 0.3, MaxValue = 1.0)]
+        public double VolatilityScaleMin { get; set; }
+
+        [Parameter("Volatility scale maximum", DefaultValue = 1.60, MinValue = 1.0, MaxValue = 4.0)]
+        public double VolatilityScaleMax { get; set; }
+
+        [Parameter("Tighten trailing after (R, 0=off)", DefaultValue = 3.0, MinValue = 0.0, MaxValue = 20.0)]
+        public double TightenTrailingAfterR { get; set; }
+
+        [Parameter("Tighten trailing factor", DefaultValue = 0.75, MinValue = 0.3, MaxValue = 1.0)]
+        public double TightenTrailingFactor { get; set; }
+
+        [Parameter("Minimum initial SL distance (ATR, 0=off)", DefaultValue = 0.75, MinValue = 0.0, MaxValue = 10.0)]
+        public double MinimumInitialSLAtrMultiple { get; set; }
+
+        [Parameter("Maximum initial SL distance (ATR, 0=off)", DefaultValue = 6.0, MinValue = 0.0, MaxValue = 50.0)]
+        public double MaximumInitialSLAtrMultiple { get; set; }
+
+        [Parameter("Initial SL rejection widen step (XAU price units)", DefaultValue = 0.03, MinValue = 0.0, MaxValue = 100.0)]
+        public double InitialStopRetryWidenStepPrice { get; set; }
+
+        [Parameter("Maximum initial SL widen steps", DefaultValue = 80, MinValue = 0, MaxValue = 500)]
+        public int MaximumInitialStopWidenSteps { get; set; }
+
+        [Parameter("Emergency SL fallback distance (XAU price units)", DefaultValue = 0.60, MinValue = 0.01, MaxValue = 1000.0)]
+        public double EmergencyInitialStopFallbackDistancePrice { get; set; }
+
         private AverageTrueRange _atr;
+        private AverageTrueRange _fastAtr;
+        private AverageTrueRange _slowAtr;
+        private double _spreadEmaPrice;
+        private const double SpreadEmaAlpha = 0.02;
+        private const int FastAtrPeriod = 5;
+        private const int SlowAtrPeriod = 50;
         private ExponentialMovingAverage _tpFastEma;
         private ExponentialMovingAverage _tpSlowEma;
         private ExponentialMovingAverage _tpTrendEma;
@@ -217,10 +262,25 @@ namespace CTStopBot
                 return;
             }
 
+            if (VolatilityScaleMin > VolatilityScaleMax ||
+                (MinimumInitialSLAtrMultiple > 0.0 && MaximumInitialSLAtrMultiple > 0.0 &&
+                 MaximumInitialSLAtrMultiple < MinimumInitialSLAtrMultiple) ||
+                MinimumQuoteToStopSpreadMultiplier < 1.0 ||
+                InitialStopRetryWidenStepPrice < 0.0 ||
+                EmergencyInitialStopFallbackDistancePrice <= 0.0)
+            {
+                Print("CT-STOPBOT stopped: invalid smart-protection settings. Check ATR scale/bounds, quote-to-spread gap, and fallback/widening distances.");
+                Stop();
+                return;
+            }
+
             LocalStorage.Reload(LocalStorageScope.Device);
             Chart.RemoveObject("CTSTOPBOT_MARKET_STATUS");
 
             _atr = Indicators.AverageTrueRange(Bars, AtrPeriod, MovingAverageType.Simple);
+            _fastAtr = Indicators.AverageTrueRange(Bars, FastAtrPeriod, MovingAverageType.Simple);
+            _slowAtr = Indicators.AverageTrueRange(Bars, SlowAtrPeriod, MovingAverageType.Simple);
+            UpdateSpreadEma();
             _tpFastEma = Indicators.ExponentialMovingAverage(Bars.ClosePrices, 9);
             _tpSlowEma = Indicators.ExponentialMovingAverage(Bars.ClosePrices, 21);
             _tpTrendEma = Indicators.ExponentialMovingAverage(Bars.ClosePrices, 50);
@@ -240,6 +300,11 @@ namespace CTStopBot
                 EnableStructureTrailing, Math.Max(1.50, TrailingStartR),
                 ManagePositionsWithServerTrailing, RestrictToLabel);
             Print("Initial R baseline is persisted per account/symbol/position. If no record exists, a loss-side SL is adopted as the baseline on first observation; this cannot prove it was the historical initial SL. If SL is at/beyond entry and no record exists, BE/trailing remain blocked rather than guessing.");
+            Print("Smart enhancements={0}; spread floor={1:F3} XAU price units; spread spike={2:F2}x; ATR scale={3:F2}-{4:F2}; tighten trailing after={5:F2}R x {6:F2}; initial SL ATR bounds={7:F2}-{8:F2}; retry widening={9:F3} price units x {10} steps.",
+                EnableSmartEnhancements, SpreadFloorPrice, SpreadSpikeMultiple,
+                VolatilityScaleMin, VolatilityScaleMax, TightenTrailingAfterR, TightenTrailingFactor,
+                MinimumInitialSLAtrMultiple, MaximumInitialSLAtrMultiple,
+                InitialStopRetryWidenStepPrice, MaximumInitialStopWidenSteps);
             Print("Suggested TP line: enabled={0} (visual only; the cBot never creates or changes a take-profit order).",
                 ShowSuggestedTpLine);
             Print("Pre-trade guidance: enabled={0}; uses closed-candle EMA 9/21/50, RSI, momentum, ATR, spread, and recent market structure. Alignment score is heuristic, not a probability or entry order.",
@@ -299,6 +364,10 @@ namespace CTStopBot
 
         private void ManageAllPositions()
         {
+            // Update a spike-resistant spread baseline before stop/guidance evaluation.
+            // High samples are capped so a news/rollover spike cannot poison the baseline.
+            UpdateSpreadEma();
+
             // Keep the pre-entry map fresh, then manage every matching open position
             // independently. The chart-only calculation cannot block SL management.
             UpdatePreTradeGuidance();
@@ -422,6 +491,15 @@ namespace CTStopBot
                 return;
             }
 
+            if (EnableSmartEnhancements && IsSpreadSpike())
+            {
+                NotifyThrottled(position.Id,
+                    string.Format(CultureInfo.InvariantCulture,
+                        "Smart spread-spike guard: BE/trailing paused at spread {0:F3} (EMA baseline {1:F3}, trigger {2:F2}x). Existing SL is retained; initial protection is not blocked by this guard.",
+                        Symbol.Spread, _spreadEmaPrice, SpreadSpikeMultiple));
+                return;
+            }
+
             var currentStop = position.StopLoss.Value;
             double initialRiskPrice;
             var hasInitialRisk = TryGetOrRecoverInitialRisk(position, out initialRiskPrice);
@@ -481,7 +559,7 @@ namespace CTStopBot
             }
 
             var liveFavorableMove = GetExecutableFavorableMovePrice(position);
-            var minimumMaintainProfit = Math.Max(initialRiskPrice * 0.50, Symbol.Spread * 2.0);
+            var minimumMaintainProfit = Math.Max(initialRiskPrice * 0.50, GetEffectiveSpreadPrice() * 2.0);
             double requiredTrailingLockPips = 0.0;
             var canLockTrailingProfit = hasInitialRisk && trailingActivated &&
                 liveFavorableMove >= minimumMaintainProfit &&
@@ -491,7 +569,9 @@ namespace CTStopBot
             // BE cost estimate; never trail merely because a lower-loss stop is possible.
             double trailingStop;
             if (EnableStructureTrailing && canLockTrailingProfit &&
-                TryCalculateStructuralStop(position, TrailingAtrBuffer, false, out trailingStop) &&
+                TryCalculateStructuralStop(position,
+                    GetAdaptiveTrailingAtrMultiplier(position, initialRiskPrice, liveFavorableMove),
+                    false, out trailingStop) &&
                 IsSafeRelativeToMarket(trailingStop, position.TradeType) &&
                 LocksEstimatedNetProfit(position, trailingStop, requiredTrailingLockPips) &&
                 IsMoreProtective(trailingStop, bestStop, position.TradeType))
@@ -1111,13 +1191,16 @@ namespace CTStopBot
             var maximumAllowedSpreadToAtr = Math.Min(MaximumQualitySpreadToAtr, MaxSpreadToAtrRatio);
             var maximumAllowedStopDistanceAtr = Math.Min(MaximumQualityStopDistanceAtr, MaximumPreTradeStopDistanceAtr);
 
-            var highConfidence = calculated && stopIsSafe && stopOnCorrectSide && targetOnCorrectSide &&
+            var spreadSpike = EnableSmartEnhancements && IsSpreadSpike();
+            var highConfidence = calculated && !spreadSpike && stopIsSafe && stopOnCorrectSide && targetOnCorrectSide &&
                 !overextended && spreadToAtr <= maximumAllowedSpreadToAtr &&
                 stopDistanceAtr >= MinimumQualityStopDistanceAtr && stopDistanceAtr <= maximumAllowedStopDistanceAtr &&
                 rewardRisk >= requiredMinimumRewardRisk &&
                 sideAlignment >= MinimumDirectionalAlignment && trendSupportsSide && momentumSupportsSide;
 
-            if (!calculated)
+            if (spreadSpike)
+                setupQuality = "WAIT — spread spike guard active";
+            else if (!calculated)
                 setupQuality = "WAIT — no valid structural setup";
             else if (!stopIsSafe)
                 setupQuality = "WAIT — SL invalid at current quote/broker gap";
@@ -2113,9 +2196,11 @@ namespace CTStopBot
 
             var direction = position.TradeType == TradeType.Buy ? 1.0 : -1.0;
             var brokerGap = GetRequiredMarketGap(position.TradeType);
-            var spreadGap = Math.Max(Symbol.Spread, Symbol.TickSize) * SpreadBufferMultiplier;
+            var effectiveSpread = GetEffectiveSpreadPrice();
+            var spreadGap = effectiveSpread * SpreadBufferMultiplier;
             var minimumWickGap = MinimumWickBufferPips * Symbol.PipSize;
-            var gapFromQuote = Math.Max(brokerGap, Math.Max(spreadGap, minimumWickGap));
+            var gapFromQuote = Math.Max(brokerGap,
+                Math.Max(EmergencyInitialStopFallbackDistancePrice, Math.Max(spreadGap, minimumWickGap)));
             var gapFromEntry = Math.Max(Symbol.TickSize, minimumWickGap);
 
             // The emergency price must both satisfy the live broker/market gap and
@@ -2299,12 +2384,73 @@ namespace CTStopBot
             return IsSafeRelativeToMarket(stopPrice, position.TradeType);
         }
 
+        private double GetEffectiveSpreadPrice()
+        {
+            return SmartProtectionEngine.GetEffectiveSpread(
+                Symbol.Spread, Symbol.TickSize, SpreadFloorPrice);
+        }
+
+        private void UpdateSpreadEma()
+        {
+            var currentSpread = Symbol.Ask - Symbol.Bid;
+            if (!IsFinitePositive(currentSpread))
+                return;
+
+            if (!IsFinitePositive(_spreadEmaPrice))
+            {
+                // Do not seed from an unusually wide quote at startup.
+                _spreadEmaPrice = Math.Min(currentSpread,
+                    Math.Max(SpreadFloorPrice, Symbol.TickSize));
+                return;
+            }
+
+            var capMultiple = Math.Max(1.5, SpreadSpikeMultiple);
+            var cap = _spreadEmaPrice * capMultiple;
+            var sample = currentSpread;
+            if (EnableSmartEnhancements && SpreadSpikeMultiple > 0.0 && cap > 0.0)
+                sample = Math.Min(currentSpread, cap);
+
+            _spreadEmaPrice += SpreadEmaAlpha * (sample - _spreadEmaPrice);
+            if (!IsFinitePositive(_spreadEmaPrice))
+                _spreadEmaPrice = Math.Min(currentSpread, Math.Max(SpreadFloorPrice, Symbol.TickSize));
+        }
+
+        private bool IsSpreadSpike()
+        {
+            if (!EnableSmartEnhancements || SpreadSpikeMultiple <= 0.0)
+                return false;
+
+            return SmartProtectionEngine.IsSpreadSpike(
+                Symbol.Ask - Symbol.Bid, _spreadEmaPrice, SpreadFloorPrice, SpreadSpikeMultiple);
+        }
+
+        private double GetAdaptiveTrailingAtrMultiplier(
+            Position position,
+            double initialRiskPrice,
+            double favorableMove)
+        {
+            if (!EnableSmartEnhancements)
+                return TrailingAtrBuffer;
+
+            var lastClosedIndex = Bars.Count - 2;
+            var fast = _fastAtr != null && lastClosedIndex >= 0 && lastClosedIndex < _fastAtr.Result.Count
+                ? _fastAtr.Result[lastClosedIndex]
+                : 0.0;
+            var slow = _slowAtr != null && lastClosedIndex >= 0 && lastClosedIndex < _slowAtr.Result.Count
+                ? _slowAtr.Result[lastClosedIndex]
+                : 0.0;
+
+            return SmartProtectionEngine.GetAdaptiveTrailingAtrMultiplier(
+                TrailingAtrBuffer, fast, slow, VolatilityScaleMin, VolatilityScaleMax,
+                favorableMove, initialRiskPrice, TightenTrailingAfterR, TightenTrailingFactor, true);
+        }
+
         private double GetBaseExecutionCostReservePrice()
         {
             if (Symbol.PipSize <= 0 || Symbol.TickSize <= 0)
                 return 0.0;
 
-            return Math.Max(Symbol.Spread, Symbol.TickSize) +
+            return Math.Max(GetEffectiveSpreadPrice(), Symbol.TickSize) +
                 SlippageReservePips * Symbol.PipSize;
         }
 
@@ -2377,7 +2523,7 @@ namespace CTStopBot
                 return false;
 
             var commissionAndFeePips = estimatedCostCash / pipValueForPosition;
-            var spreadPips = (Symbol.Spread / Symbol.PipSize) * BreakEvenSpreadMultiplier;
+            var spreadPips = (GetEffectiveSpreadPrice() / Symbol.PipSize) * BreakEvenSpreadMultiplier;
 
             offsetPips = spreadPips + commissionAndFeePips + SlippageReservePips + MinimumNetLockPips;
             return !double.IsNaN(offsetPips) && !double.IsInfinity(offsetPips) && offsetPips >= 0.0;
@@ -2399,7 +2545,9 @@ namespace CTStopBot
 
         private double GetRequiredMarketGap(TradeType tradeType)
         {
-            var minimumGap = Math.Max(Symbol.TickSize, MinimumMarketGapPips * Symbol.PipSize);
+            var minimumGap = Math.Max(
+                Math.Max(Symbol.TickSize, MinimumMarketGapPips * Symbol.PipSize),
+                GetEffectiveSpreadPrice() * MinimumQuoteToStopSpreadMultiplier);
             var brokerDistance = Symbol.MinStopLossDistance;
 
             if (double.IsNaN(brokerDistance) || double.IsInfinity(brokerDistance) || brokerDistance <= 0)
