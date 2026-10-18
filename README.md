@@ -20,21 +20,23 @@ Initial target: XAUUSD / Gold on the 5-minute chart. The first iteration focuses
 - Supports independent switches for initial stop, break-even and structural trailing; position-level exceptions are logged instead of silently aborting the management loop.
 - Keeps stop-management state keyed by position ID, so multiple matching-symbol positions are processed independently. By default, all labels on the chart symbol are eligible, including manual positions; other cBots on that symbol may also be affected. Native server-side trailing positions are left alone by default. Positions carrying native server-side break-even are skipped until the typed API is verified against the pinned package and demo-tested.
 - Supports a minimum commission-cost reserve for broker schedules where the observed opening commission is zero or below the true round-trip minimum.
-- Draws a per-position suggested TP line with a concise `TP | N pips` label 20 M5 candles to the right of the active candle. Text is edge-aligned away from the line with an ATR/spread-aware gap. When a loss-side SL exists, the TP suggestion is hidden if cost-adjusted R:R against that SL is below the minimum filter; this feature never creates or changes an actual TP order.
-- Draws pre-entry `ENTRY`, `SL`, and `TP` only for a qualified BUY or SELL setup. ENTRY is a conditional breakout trigger based on a confirmed swing high/low with an ATR/spread buffer; SL uses confirmed structure when possible; TP uses volatility plus nearby resistance/support. These are chart-only suggestions, never orders.
-- Every guide spans 20 actual bar indices before and 20 after the active M5 candle, with thickness 1 and no automatic viewport scrolling. Labels contain only the line name and pip distance, use 14-point Segoe UI Light, and are anchored by their nearest text edge away from the line. Unqualified/invalid pre-entry candidates are suppressed instead of being displayed as low-confidence pseudo-signals; a qualified ENTRY is gold with a star.
+- Draws a per-position suggested TP line 20 M5 bars to the right of the active bar. It budgets distance from the persisted original risk R when recoverable, considers the nearest opposing closed-candle structure, and uses estimated spread/slippage/commission/swap costs when metadata permits. A target constrained by nearby structure remains visible as `TP!` with its R:R (or an explicit unknown-cost/risk note); it is not pushed through support/resistance or silently deleted to disguise a low R:R. This is visual guidance only and never creates or edits an actual TP order.
+- Draws calculated pre-entry `ENTRY`, `SL`, and `TP` guides whenever valid structure/market data exists. A setup that fails a quality floor remains visible as dotted provisional lines with `SL!`/`TP!` and status text, rather than disappearing or pretending it is qualified. ENTRY is a conditional breakout trigger, SL uses closed-candle structure/wick clusters and broker-gap checks, and TP respects the nearest opposing structure. These are chart-only suggestions, never orders.
+- Every guide spans 20 M5 candles to the left and 20 M5 candles to the right of the active candle, uses time-based chart coordinates and thickness 1, and never scrolls the viewport automatically. Labels use 14-point Segoe UI Light and an ATR/tick/pip/spread-aware price offset. Unqualified candidates are dotted and labelled as provisional; only a qualified ENTRY is gold with a star.
 - Generic pre-entry ENTRY/TP lines are removed for a side when a matching position is open. The generic SL line is hidden only once all matching positions are protected; otherwise a short `SL!` warning label remains. Each open position keeps its own TP line and short label. Pre-entry lines are visual guidance only, not active orders; no entry is opened and no real TP is created or modified.
-- Hard quality floors require cost-adjusted R:R of at least 1.8 after a conservative spread/slippage reserve, SL distance from 0.25 to 2.25 ATR, spread/ATR at most 0.16, directional alignment at least 0.65, no extended momentum, and closed-candle trend and momentum both confirming the side. Parameter presets may tighten, but cannot weaken, these floors. These are conservative engineering filters, not evidence of a statistically validated trading edge.
+- Hard quality floors require cost-adjusted R:R of at least 1.8 after execution-cost reserves, SL distance from 0.25 to 2.25 ATR, spread/ATR at most 0.16, directional alignment at least 0.65, no extended momentum, and closed-candle trend and momentum confirming the side. The pre-entry commission reserve is separately configurable because a future position's volume and account commission schedule are not known yet. These filters are engineering screens, not evidence of a statistically validated trading edge.
 
 ## Repository workflow (Windows)
 
 The repository can live anywhere; it does not need to be inside cTrader's folders. The project file is `src/CT-STOPBOT/CT-STOPBOT.csproj`.
 
-1. Install Git for Windows and the .NET 6 SDK (the current project targets net6.0).
-2. Clone the development branch into your own workspace.
-3. Run the following from the repository root in PowerShell:
+1. Install Git for Windows and the .NET 6 SDK (the cBot target is net6.0).
+2. Pull the `feature/stop-management-v0.1` branch.
+3. Run the logic tests, source-invariant checks and release build from the repository root:
 
 ```powershell
+dotnet run --project .\tests\CT-STOPBOT.Logic.Tests\CT-STOPBOT.Logic.Tests.csproj -c Release
+.\scripts\verify-cbot-source.ps1
 dotnet build .\src\CT-STOPBOT\CT-STOPBOT.csproj -c Release -p:AlgoPublish=true -p:IncludeSource=false
 ```
 
