@@ -4,7 +4,7 @@
 
 The bot manages existing positions; it does not create entries or change position volume. It is deliberately restricted to an M5 chart and a symbol containing the configured string (default XAUUSD). A broker may call Gold GOLD, XAUUSD., or another alias; adjust the symbol filter only after confirming the correct instrument.
 
-By default it manages all position labels on that symbol, including manual positions. Enable the label restriction when only a particular strategy's positions should be touched. Use the feature switches to isolate initial-stop, break-even and structure-trailing behaviour during demo tests. Positions already using cTrader's server-side trailing stop are skipped by default to avoid competing stop managers; enable that option only after a dedicated test.
+By default it manages all position labels on that symbol, including manual positions. Enable the label restriction when only a particular strategy's positions should be touched. Use the feature switches to isolate initial-stop, break-even and structure-trailing behaviour during demo tests. Positions already using cTrader's server-side trailing stop are skipped by default to avoid competing stop managers; enabling management for these positions requires a dedicated test. Positions with a native server-side break-even rule are always skipped because the pinned API package does not offer a compatible atomic overload for preserving that rule during an SL update.
 
 ## Initial stop
 
@@ -67,7 +67,7 @@ One stop modification is attempted per position at a time. Failed changes are lo
 
 - Separate parameter switches allow initial stop placement, break-even, and structure trailing to be tested independently. Disabling initial stop placement can leave a position with no stop; it is a test control, not a safe live default.
 - Position management is wrapped in exception handling so one unexpected per-position exception is logged instead of terminating the entire per-tick loop.
-- Position modifications preserve take-profit, the server-side trailing flag, stop trigger method, and any existing server-side break-even settings. Structural stops round outward; break-even targets round toward the intended profit offset (Buy up, Sell down), then are revalidated against current/broker distance. If an existing stop becomes too close to the market/broker gap or appears crossed, the bot warns but will not widen it.
+- Position modifications preserve take-profit, the server-side trailing flag and stop trigger method. A position with native server-side break-even settings is skipped entirely. Structural stops round outward; break-even targets round toward the intended profit offset (Buy up, Sell down), then are revalidated against current/broker distance. If an existing stop becomes too close to the market/broker gap or appears crossed, the bot warns but will not widen it.
 - The final selected trailing candidate must still meet the trailing-step threshold; a break-even candidate does not accidentally waive that threshold if structural trailing supersedes it.
 - Minimum round-trip commission reserve can account for broker minimum commissions when the observed opening commission is zero or unusually small.
 
