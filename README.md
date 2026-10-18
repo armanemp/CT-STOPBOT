@@ -18,7 +18,7 @@ Initial target: XAUUSD / Gold on the 5-minute chart. The first iteration focuses
 - Uses emergency fallback only for missing initial protection; an invalidated trailing candidate is skipped rather than snapped to market.
 - Includes a label filter for users who do not want to manage every position on the selected symbol.
 - Supports independent switches for initial stop, break-even and structural trailing; position-level exceptions are logged instead of silently aborting the management loop.
-- Leaves positions with native server-side trailing untouched by default and preserves stop trigger, trailing and native break-even settings when a stop is modified; break-even targets round toward the intended profit offset.
+- Leaves positions with native server-side trailing untouched by default and preserves stop trigger and trailing settings when a stop is modified; positions with native server-side break-even are excluded because the pinned API lacks an atomic preserving overload. Break-even targets round toward the intended profit offset.
 - Supports a minimum commission-cost reserve for broker schedules where the observed opening commission is zero or below the true round-trip minimum.
 
 ## Repository workflow (Windows)
