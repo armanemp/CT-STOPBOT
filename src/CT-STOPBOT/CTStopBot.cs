@@ -633,15 +633,20 @@ namespace CTStopBot
                 extendedAfterTarget = true;
             }
 
-            // Look for the nearest opposing closed-candle structure. Before the first
-            // target is reached, even a close barrier matters; after a target is reached,
-            // use a larger minimum distance to avoid reacting to tiny quote noise.
+            // While price remains on the loss side, the target still represents a
+            // profitable objective from entry: ignore barriers already behind entry.
+            // Once the position is in profit, evaluate the next barrier from the live
+            // executable quote so a reached target can extend to the next objective.
+            var structureReferencePrice =
+                direction * (referencePrice - position.EntryPrice) > Symbol.TickSize * 0.5
+                    ? referencePrice
+                    : position.EntryPrice;
             var structureSearchDistance = Math.Max(Symbol.TickSize * 2.0, Symbol.Spread * 0.5);
             var firstIndex = lastClosedIndex - TpStructureLookback + 1;
             double nearestLevel;
             var foundLevel = TryFindNearestTargetPivot(
                 position.TradeType, lastClosedIndex, TpStructureLookback,
-                referencePrice, structureSearchDistance, out nearestLevel);
+                structureReferencePrice, structureSearchDistance, out nearestLevel);
             var usedConfirmedPivot = foundLevel;
             if (!foundLevel)
                 nearestLevel = position.TradeType == TradeType.Buy ? double.MaxValue : double.MinValue;
@@ -651,7 +656,7 @@ namespace CTStopBot
                 if (position.TradeType == TradeType.Buy)
                 {
                     var high = Bars.HighPrices[i];
-                    if (high > referencePrice + structureSearchDistance && high < nearestLevel)
+                    if (high > structureReferencePrice + structureSearchDistance && high < nearestLevel)
                     {
                         nearestLevel = high;
                         foundLevel = true;
@@ -660,7 +665,7 @@ namespace CTStopBot
                 else
                 {
                     var low = Bars.LowPrices[i];
-                    if (low < referencePrice - structureSearchDistance && low > nearestLevel)
+                    if (low < structureReferencePrice - structureSearchDistance && low > nearestLevel)
                     {
                         nearestLevel = low;
                         foundLevel = true;
@@ -675,7 +680,7 @@ namespace CTStopBot
                     Math.Max(Symbol.Spread, atrPrice * 0.05));
                 double cappedTarget;
                 if (RiskRewardEngine.TryCapTargetBeforeBarrier(
-                    referencePrice, target, nearestLevel, structureBuffer,
+                    structureReferencePrice, target, nearestLevel, structureBuffer,
                     structureSearchDistance, directionSign, out cappedTarget))
                 {
                     target = cappedTarget;
