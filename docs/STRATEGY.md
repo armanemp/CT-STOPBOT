@@ -4,7 +4,7 @@
 
 This cBot manages positions that already exist on the attached chart symbol. It never opens a trade, changes volume, or intentionally closes a position. The expected chart is **Gold/XAUUSD M1**; the symbol filter defaults to `XAUUSD`, so configure it only after verifying the broker's actual symbol alias (for example, `GOLD`).
 
-By default, all positions on that symbol are eligible, including manually opened positions and potentially positions opened by another cBot. Enable the label restriction if needed. A position that already has an SL keeps it: the initial-stop routine only installs an SL when the position has none. Native server-side break-even positions are skipped because this source version does not use a verified typed modification overload that preserves that setting. Native server-side trailing positions are skipped by default to avoid competing managers.
+By default, the exact-label filter is enabled with an empty label, targeting unlabeled manual positions and keeping positions tagged by other cBots out of scope. If your manual trades carry a label, configure that exact label. Disabling the filter allows all same-symbol positions and should be done only after confirming no other cBot can conflict. A position that already has an SL keeps it: the initial-stop routine only installs an SL when the position has none. Native server-side break-even positions are skipped because this source version does not use a verified typed modification overload that preserves that setting. Native server-side trailing positions are skipped by default to avoid competing managers.
 
 ## Initial M1 stop: previous candle wick
 
