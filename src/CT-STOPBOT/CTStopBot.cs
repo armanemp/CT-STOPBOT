@@ -2802,9 +2802,6 @@ namespace CTStopBot
                 return;
             }
 
-            if (isInitial && !position.StopLoss.HasValue)
-                LogInitialRiskEstimate(position, stopPrice);
-
             DateTime lastAttempt;
             var retryDelay = RetryCooldownSeconds;
             int failures;
@@ -2821,6 +2818,11 @@ namespace CTStopBot
                 return;
 
             _lastAttemptAt[position.Id] = Server.Time;
+
+            // Log the planned cash risk only when a real initial-stop request is about to be sent,
+            // not on every tick while the modification retry cooldown is still active.
+            if (isInitial && !position.StopLoss.HasValue)
+                LogInitialRiskEstimate(position, stopPrice);
 
             // Preserve the position's existing server-side trailing-stop flag and
             // stop trigger method while changing only the absolute stop price.
