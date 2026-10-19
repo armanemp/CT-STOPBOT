@@ -2307,7 +2307,7 @@ namespace CTStopBot
 
             anchorPrice = primary;
             var maximumExtension = MaximumNearbyWickExtensionPips * Symbol.PipSize;
-            var firstIndex = Math.Max(0, lastClosedIndex - Math.Max(1, NearbyWickScanBars - 1));
+            var firstIndex = Math.Max(0, lastClosedIndex - Math.Max(0, NearbyWickScanBars - 1));
             for (var i = lastClosedIndex - 1; i >= firstIndex; i--)
             {
                 var candidate = tradeType == TradeType.Buy ? Bars.LowPrices[i] : Bars.HighPrices[i];
