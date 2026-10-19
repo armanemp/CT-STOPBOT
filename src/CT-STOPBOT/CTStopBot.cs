@@ -132,9 +132,6 @@ namespace CTStopBot
         [Parameter("Break-even activation extra (pips)", DefaultValue = 1.5, MinValue = 0.0, MaxValue = 100.0)]
         public double BreakEvenTriggerExtraPips { get; set; }
 
-        [Parameter("Break-even spread multiplier", DefaultValue = 0.75, MinValue = 0.0, MaxValue = 5.0)]
-        public double BreakEvenSpreadMultiplier { get; set; }
-
         [Parameter("Round-trip commission multiplier", DefaultValue = 2.0, MinValue = 0.0, MaxValue = 5.0)]
         public double RoundTripCommissionMultiplier { get; set; }
 
@@ -2688,9 +2685,12 @@ namespace CTStopBot
                 return false;
 
             var commissionAndFeePips = estimatedCostCash / pipValueForPosition;
-            var spreadPips = (GetEffectiveSpreadPrice() / Symbol.PipSize) * BreakEvenSpreadMultiplier;
 
-            offsetPips = spreadPips + commissionAndFeePips + SlippageReservePips + MinimumNetLockPips;
+            // Position.Pips is measured from the actual entry fill against the executable
+            // close-side quote, so the opening spread is already reflected in live Pips.
+            // Adding the spread again here delays BE twice; keep an effective-spread floor
+            // in the stop-to-market safety check, and reserve commission/slippage/net lock here.
+            offsetPips = commissionAndFeePips + SlippageReservePips + MinimumNetLockPips;
             return !double.IsNaN(offsetPips) && !double.IsInfinity(offsetPips) && offsetPips >= 0.0;
         }
 
