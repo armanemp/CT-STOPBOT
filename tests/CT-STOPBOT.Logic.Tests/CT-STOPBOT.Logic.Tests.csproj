@@ -7,5 +7,6 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\..\src\CT-STOPBOT\RiskRewardEngine.cs" Link="RiskRewardEngine.cs" />
+    <Compile Include="..\..\src\CT-STOPBOT\SmartProtectionEngine.cs" Link="SmartProtectionEngine.cs" />
   </ItemGroup>
 </Project>
