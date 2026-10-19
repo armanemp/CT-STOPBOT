@@ -1,109 +1,53 @@
-# Demo validation plan
+# Demo test plan — CT-STOPBOT-M1-Manual
 
-Do not skip these tests before live use. Record the broker, account type, symbol name, server time, symbol digits/tick size/pip size, observed spread, commission and the final result for each test.
+**Do not run live until each safety check below passes on the actual broker's Gold symbol.** This robot manages manual positions only; it does not open or resize trades.
 
-## Build and configuration
+## Build and symbol setup
 
-- [ ] Build in the installed cTrader Automate version; resolve every compile warning/error.
-- [ ] Start on XAUUSD M5; confirm the cBot logs its start.
-- [ ] Start on M1 and H1; confirm it refuses to run.
-- [ ] Start on a non-Gold symbol; confirm it stops.
-- [ ] Confirm the broker's symbol alias and configure the symbol filter if required.
-- [ ] Confirm whether all Gold positions should be managed or enable label restriction.
-- [ ] Verify startup diagnostics show correct pip/tick sizes, current spread, minimum stop distance, and distance units.
-- [ ] Verify initial-stop, break-even and structure-trailing switches can be tested independently.
-- [ ] Open a position with cTrader server-side trailing enabled; confirm the bot leaves it untouched by default.
-- [ ] Open a position with cTrader native server-side break-even configured; confirm the bot logs that it is excluded and makes no SL modifications.
+- [ ] Run the logic test project and `scripts/verify-cbot-source.ps1`.
+- [ ] Build the Release cBot using the installed cTrader Automate package.
+- [ ] Confirm the resulting artifact is named `CT-STOPBOT-M1-Manual` and the file in cTrader's Robots folder matches the latest build.
+- [ ] Start on the broker's XAUUSD/Gold **M1** chart. Confirm it refuses M5 and any unapproved symbol.
+- [ ] Confirm the broker symbol alias, PipSize, TickSize, PipValue, current spread and minimum stop-loss distance in startup diagnostics.
+- [ ] Confirm whether all same-symbol positions or only a specific label should be managed.
+- [ ] For a USD account with the stated schedule, confirm one-way commission is USD 5 per lot and set the account-currency parameter accordingly. Confirm the effective spread floor in price units; 0.25 means 25 pips only if PipSize = 0.01.
 
-## Initial protection
+## Initial stop / nearby wick
 
-- [ ] Open a small demo Buy position manually with no stop; confirm a stop is installed or the exact failure is logged.
-- [ ] Repeat for Sell.
-- [ ] Open a position with an existing stop; confirm the initial-stop logic does not replace it.
-- [ ] Move price close to an existing stop; confirm the bot warns when that stop is inside the current/broker gap and never widens it.
-- [ ] Open a position while the market is moving quickly; confirm rejected/unsafe candidates are logged and the bot retries.
-- [ ] Start the cBot while an eligible position is already open without a stop; confirm it attempts protection.
-- [ ] Confirm the candidate is beyond the selected closed-candle swing and rounded to tick size.
-- [ ] With insufficient chart history, confirm the structural calculator does not use partial bars. If a naked position has no SL, confirm the bot attempts a visibly logged emergency loss-side/broker-gap SL, or reports why no safe emergency level can be placed.
-- [ ] Force repeated stop modification rejections and confirm retry delays start at the configured cooldown and then increase up to the configured maximum.
-- [ ] Confirm stop placement respects the broker-reported minimum stop-loss distance when distance units are pips.
-- [ ] If the broker reports percentage-based minimum distance, confirm the diagnostic log displays the units and candidate stops respect the percentage-derived gap.
-- [ ] Confirm dynamic freeze rules can still reject an update and that the rejection is logged rather than treated as successful protection.
-- [ ] Force/observe a case where the initial candle-based level is too close to or through the current quote; confirm the fallback warning is visible and a broker rejection is never reported as success.
-- [ ] Force/observe an already-protected position whose trailing structure is invalidated; confirm that the trailing update is skipped instead of snapping the stop to the current market.
+- [ ] On demo, open a small Buy without an SL. Verify the installed SL sits below the most recently closed M1 candle's Low, plus its protective buffer.
+- [ ] Open a small Sell without an SL. Verify the installed SL sits above the most recently closed M1 candle's High, plus its protective buffer.
+- [ ] Create a case where a neighbouring candle has a slightly more extreme and genuinely longer relevant wick, within the configured extension allowance. Verify it is selected.
+- [ ] Create a case where the neighbouring wick extends beyond the allowance or does not have a longer relevant shadow. Verify it is ignored.
+- [ ] Confirm the currently forming M1 candle is never the initial anchor.
+- [ ] Confirm a pre-existing manual SL is not overwritten by the initial-stop routine.
+- [ ] Inspect any fallback log when the preferred wick level is too close to the current quote or is rejected by the broker; verify the actual SL on the position, not only the log.
+- [ ] Check initial risk estimate, volume in lots, commission reserve and warning threshold. Verify a risk above the threshold produces a warning and that it does not silently move the SL inside the wick.
 
 ## Break-even and trailing
 
-- [ ] Confirm no break-even move occurs before its configured estimated-cost threshold.
-- [ ] Confirm the stop moves only when the candidate is more protective.
-- [ ] Confirm commission multiplier, minimum round-trip commission reserve, spread, slippage and additional cost reserve change the estimated break-even offset as expected.
-- [ ] Set the pre-entry commission reserve in pips for the broker's estimated round-trip commission; confirm it affects pre-entry R:R only, not the live-position cash-cost estimate.
-- [ ] Confirm already-accrued negative swap increases the required break-even offset; positive swap does not reduce the conservative cost estimate.
-- [ ] Confirm stop modification preserves existing take-profit, stop trigger method and server-side trailing setting.
-- [ ] Confirm positions with a native server-side break-even rule are excluded from management by this package version.
-- [ ] Verify Buy break-even targets round up to tick size and Sell targets round down, then remain outside the current/broker minimum gap.
-- [ ] Test both Buy and Sell in a widening spread; observe whether stop candidates are skipped safely.
-- [ ] Verify realised net P/L after stop closure, not merely the displayed stop price.
-- [ ] Let price make higher lows/lower highs; confirm trailing follows closed-candle structure and never loosens the stop.
-- [ ] Confirm trailing respects the configured minimum improvement step even when a break-even candidate is also eligible.
-- [ ] Confirm the bot does not modify other symbols or excluded labels.
+- [ ] Confirm the BE candidate does not activate merely from unrealised profit before a fully closed post-entry M1 candle confirms the R threshold.
+- [ ] Confirm BE waits until estimated spread, round-trip commission and slippage offset plus the extra activation margin are covered.
+- [ ] Compare the required offset with actual broker commission and final net P/L for a closed trade. Tune only after recording the difference.
+- [ ] Confirm BE only improves the stop and never loosens it.
+- [ ] Confirm trailing starts after the configured R threshold and closed-candle confirmation, then updates using closed-candle structure.
+- [ ] Confirm the trailing step suppresses tiny modifications and that a candidate crossed by price or inside broker minimum distance is skipped instead of forced inward.
+- [ ] Verify TP is unchanged when modifying SL, and each same-symbol position is managed independently.
+- [ ] Confirm native server-side trailing positions are left alone by default and native server-side break-even positions are skipped.
 
-## Multiple-position independence
+## Resilience and restart
 
-- [ ] Open two or more manual demo positions on the same symbol, including both Buy and Sell and different volumes; verify each position ID receives its own stop-management decisions and retry state.
-- [ ] Give the positions different pre-existing stops; verify the bot never copies a candidate or retry state from one position to another.
-- [ ] Confirm a close removes only the closed position's TP line and per-position state.
-- [ ] If other cBots share the symbol, confirm the default all-label scope is intentional or verify label restriction against the actual platform labels.
-
-## Suggested TP visualization (display-only)
-
-- [ ] Open several positions and confirm a separate TP suggestion label/line is drawn for every eligible position ID.
-- [ ] Verify the line is green for Buy, red for Sell, short/dotted, and visible on the chart.
-- [ ] Record the actual `Position.TakeProfit` before and after cBot operation; confirm this feature never submits or changes it.
-- [ ] Watch small tick fluctuations and confirm the line does not move unless the ATR/pip threshold is met.
-- [ ] Confirm trend/momentum context changes can update the label without forcing a price jump.
-- [ ] Approach the suggested TP without reaching it and confirm the line does not jump away; only once the old target is reached/passed should the next ATR objective be calculated.
-- [ ] Confirm the nearest valid historical resistance/support can cap the ATR target, and inspect both trend-aligned and countertrend cases.
-- [ ] Disable the suggested TP line; confirm the drawings are removed and no TP order is changed.
-- [ ] Close a position and stop the cBot; confirm the corresponding drawings are removed.
-
-## Pre-entry guidance and position handover
-
-- [ ] Start with no positions and sufficient M5 history; confirm calculated ENTRY/SL/TP guides remain visible for both directions when structural values exist. A side that fails any strict quality floor must use dotted provisional lines, `SL!`/`TP!` warning labels, and an explicit status reason—not a false qualified signal.
-- [ ] On qualified and unqualified setups, confirm ENTRY/SL/TP match their own line price and use thickness 1. Unqualified calculations should remain visible as dotted/provisional guides instead of disappearing.
-- [ ] Confirm no verbose static market panel remains, and each line label contains only its short name plus distance in pips; no entry, TP or SL price number and no per-position ID appears.
-- [ ] Confirm the chart viewport does not jump on cBot start or reload, and lines span from 20 actual bar indices before the active candle to 20 after it.
-- [ ] As each new M5 candle forms, confirm guide lines span 20 M5 candles left and 20 right using time-based coordinates; labels track the right endpoint without touching the line, and the chart does not auto-scroll.
-- [ ] Confirm labels use a larger, thin/light font and the coordinated palette; the nearest text edge is offset away from the line with a visible gap. Labels must contain no price values, position IDs, or explanations.
-- [ ] Confirm every guide line has thickness 1; a qualified ENTRY is gold with a star, and unqualified/invalid levels are dotted with a concise `SL!` or `TP!` label/status reason.
-- [ ] Confirm ENTRY is a conditional breakout level at a confirmed swing high/low with an ATR/spread buffer, not simply the current Ask/Bid.
-- [ ] Confirm pre-entry SL prefers the latest confirmed pivot with the configured strength, with a range-extreme fallback when no safe confirmed pivot can be used.
-- [ ] Compare the displayed pre-entry SL with the bot-installed initial SL in a manual Buy and Sell; aside from quote changes, emergency safety fallback, or the minimum entry-loss-side guard, the structural anchor and buffer should match.
-- [ ] Confirm the displayed geometry—not only unsmoothed candidate values—is rechecked for stop side/safety, 0.25–2.25 ATR risk distance, net R:R ≥ 1.8, spread/ATR ≤ 0.16, alignment ≥ 0.65, no extended momentum, and closed-candle trend/momentum confirmation. When a nearby opposing structure prevents 1.8R, TP stays before it, is marked `TP!`, and the side status shows the low ratio; it must not project through the structure to fake qualification.
-- [ ] Test a nearby confirmed pivot target, no-pivot fallback, and the case where a pivot is too close to current price to be a valid target barrier.
-- [ ] Verify the lines are chart-only; no position/order is created and no active stop is implied by a proposed line.
-- [ ] During small quote/spread fluctuations, verify proposal lines stay stable; after a meaningful price/structure change, verify they update within the configured threshold/cooldown rules.
-- [ ] Observe the TP proposal being reached; confirm the next forward TP objective is calculated without creating/changing an actual TP order.
-- [ ] Open a manual BUY without an SL; confirm the pre-entry ENTRY/TP suggestions for that side disappear, the generic SL line remains as a concise red `SL!` warning until protection exists, and per-position TP lines continue.
-- [ ] After the actual SL appears on the position, confirm the generic BUY SL proposal disappears; confirm the live position-specific TP line remains and continues updating.
-- [ ] Repeat for SELL and both directions simultaneously.
-- [ ] If the broker rejects the initial SL, confirm the generic SL warning line remains until protection can be observed; labels must remain short and contain only the warning name plus pips.
-- [ ] Open multiple positions on one side; confirm the generic SL proposal is hidden only when all same-side matching positions show SL/native trailing/native BE protection, and each open position retains its own TP line.
-- [ ] Close all positions in one direction; confirm the pre-entry scenario for that side becomes available again.
-- [ ] Disable pre-trade guidance and confirm its lines are removed; verify independent per-position TP behavior follows the TP display toggle.
-
-## Resilience
-
-- [ ] Check log output on broker rejection and ensure it never claims a failed stop was set.
-- [ ] Confirm repeated rejections use exponential backoff up to the configured maximum retry interval.
-- [ ] Observe one forced/induced management exception if feasible; confirm the bot logs it and continues servicing other positions.
-- [ ] Check that setting `Manage positions with server-side trailing` off prevents conflicts with native trailing positions.
-- [ ] Restart the cBot with a protected position; confirm it keeps and only tightens the existing stop.
-- [ ] Restart the cBot with an unprotected position; confirm it retries an initial stop.
-- [ ] Observe behaviour through a temporary connection interruption and during high-spread/rollover periods.
-- [ ] Compare costs and realised net P/L against the broker's deal history.
-- [ ] Run enough demo samples across Buy/Sell and varying volatility before reviewing live deployment.
+- [ ] Test spread spikes and the market reopening after a quiet/closed period. BE/trailing should pause during a detected spread spike; the current SL must remain present.
+- [ ] Test broker rejections, freeze distance, and retry/backoff logs.
+- [ ] Restart the cBot with a naked demo position and verify it tries to protect it; immediately confirm whether the position actually has an SL.
+- [ ] Check multiple manual positions and ensure one position's failure does not stop the others from being processed.
+- [ ] Test suggested TP and pre-entry SL/TP guides: labels should remain visual only, no entry order should open, and the actual Take Profit must remain unchanged.
 
 ## Acceptance criteria
 
-A test is not passed solely because the cBot builds. All failed protection modifications must be visible in logs, existing stops must never be loosened, both directions must behave correctly, and demo results must match the configured commission/spread-cost assumptions to a reasonable degree. A successful test does not remove execution or slippage risk.
+- [ ] All successful SL modifications are confirmed by refreshed position state and visible in cTrader.
+- [ ] No observed path intentionally widens an existing stop.
+- [ ] Both Buy and Sell tests pass with the broker's real pip/tick conventions.
+- [ ] Commission/spread settings align with demo history.
+- [ ] The user understands the 50 account-currency risk threshold is warning-only and a 1-lot manual position can exceed it if the structural wick is distant or the broker forces a wider SL.
+
+Passing these tests does not establish profitability or eliminate execution risk. Keep the first runs on demo and compare actual results with the estimates.
