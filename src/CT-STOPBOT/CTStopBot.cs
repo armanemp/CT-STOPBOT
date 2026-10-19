@@ -12,10 +12,10 @@ namespace CTStopBot
         [Parameter("Symbol name contains", DefaultValue = "XAUUSD")]
         public string SymbolNameFilter { get; set; }
 
-        [Parameter("Restrict to label", DefaultValue = false)]
+        [Parameter("Restrict to label (recommended)", DefaultValue = true)]
         public bool RestrictToLabel { get; set; }
 
-        [Parameter("Managed position label", DefaultValue = "CT-STOPBOT")]
+        [Parameter("Managed position label (empty = unlabeled manual trades)", DefaultValue = "")]
         public string ManagedLabel { get; set; }
 
         [Parameter("Nearby wick scan (closed M1 candles)", DefaultValue = 3, MinValue = 1, MaxValue = 6)]
