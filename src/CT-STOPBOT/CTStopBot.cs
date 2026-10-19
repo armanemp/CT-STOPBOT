@@ -147,7 +147,7 @@ namespace CTStopBot
         [Parameter("Slippage reserve (pips)", DefaultValue = 3.0, MinValue = 0.0, MaxValue = 100.0)]
         public double SlippageReservePips { get; set; }
 
-        [Parameter("Pre-entry commission reserve (pips)", DefaultValue = 10.0, MinValue = 0.0, MaxValue = 1000.0)]
+        [Parameter("Pre-entry commission reserve (pips, extra floor)", DefaultValue = 0.0, MinValue = 0.0, MaxValue = 1000.0)]
         public double PreEntryCommissionReservePips { get; set; }
 
         [Parameter("Minimum net lock (pips)", DefaultValue = 1.0, MinValue = 0.0, MaxValue = 100.0)]
@@ -171,7 +171,7 @@ namespace CTStopBot
         [Parameter("Spread floor (XAU price units)", DefaultValue = 0.25, MinValue = 0.0, MaxValue = 100.0)]
         public double SpreadFloorPrice { get; set; }
 
-        [Parameter("Minimum quote-to-stop distance (x effective spread)", DefaultValue = 1.10, MinValue = 1.0, MaxValue = 10.0)]
+        [Parameter("Minimum quote-to-stop distance (x effective spread)", DefaultValue = 0.35, MinValue = 0.25, MaxValue = 10.0)]
         public double MinimumQuoteToStopSpreadMultiplier { get; set; }
 
         [Parameter("Spread-spike guard multiplier (0=off)", DefaultValue = 2.5, MinValue = 0.0, MaxValue = 20.0)]
@@ -188,18 +188,6 @@ namespace CTStopBot
 
         [Parameter("Tighten trailing factor", DefaultValue = 0.75, MinValue = 0.3, MaxValue = 1.0)]
         public double TightenTrailingFactor { get; set; }
-
-        [Parameter("Minimum initial SL distance (ATR, 0=off)", DefaultValue = 0.0, MinValue = 0.0, MaxValue = 10.0)]
-        public double MinimumInitialSLAtrMultiple { get; set; }
-
-        [Parameter("Maximum initial SL distance (ATR, 0=off)", DefaultValue = 0.0, MinValue = 0.0, MaxValue = 50.0)]
-        public double MaximumInitialSLAtrMultiple { get; set; }
-
-        [Parameter("Initial SL rejection widen step (XAU price units)", DefaultValue = 0.03, MinValue = 0.0, MaxValue = 100.0)]
-        public double InitialStopRetryWidenStepPrice { get; set; }
-
-        [Parameter("Maximum initial SL widen steps", DefaultValue = 80, MinValue = 0, MaxValue = 500)]
-        public int MaximumInitialStopWidenSteps { get; set; }
 
         [Parameter("Emergency SL fallback distance (XAU price units)", DefaultValue = 0.30, MinValue = 0.01, MaxValue = 1000.0)]
         public double EmergencyInitialStopFallbackDistancePrice { get; set; }
@@ -275,10 +263,7 @@ namespace CTStopBot
             }
 
             if (VolatilityScaleMin > VolatilityScaleMax ||
-                (MinimumInitialSLAtrMultiple > 0.0 && MaximumInitialSLAtrMultiple > 0.0 &&
-                 MaximumInitialSLAtrMultiple < MinimumInitialSLAtrMultiple) ||
-                MinimumQuoteToStopSpreadMultiplier < 1.0 ||
-                InitialStopRetryWidenStepPrice < 0.0 ||
+                MinimumQuoteToStopSpreadMultiplier < 0.25 ||
                 EmergencyInitialStopFallbackDistancePrice <= 0.0)
             {
                 Print("CT-STOPBOT stopped: invalid smart-protection settings. Check ATR scale/bounds, quote-to-spread gap, and fallback/widening distances.");
@@ -314,11 +299,9 @@ namespace CTStopBot
                 EnableStructureTrailing, Math.Max(1.0, TrailingStartR),
                 ManagePositionsWithServerTrailing, RestrictToLabel);
             Print("Initial R baseline is persisted per account/symbol/position. If no record exists, a loss-side SL is adopted as the baseline on first observation; this cannot prove it was the historical initial SL. If SL is at/beyond entry and no record exists, BE/trailing remain blocked rather than guessing.");
-            Print("Smart enhancements={0}; spread floor={1:F3} XAU price units; spread spike={2:F2}x; ATR scale={3:F2}-{4:F2}; tighten trailing after={5:F2}R x {6:F2}; initial SL ATR bounds={7:F2}-{8:F2}; retry widening={9:F3} price units x {10} steps.",
+            Print("Smart enhancements={0}; spread floor={1:F3} XAU price units; spread spike={2:F2}x; ATR scale={3:F2}-{4:F2}; tighten trailing after={5:F2}R x {6:F2}.",
                 EnableSmartEnhancements, SpreadFloorPrice, SpreadSpikeMultiple,
-                VolatilityScaleMin, VolatilityScaleMax, TightenTrailingAfterR, TightenTrailingFactor,
-                MinimumInitialSLAtrMultiple, MaximumInitialSLAtrMultiple,
-                InitialStopRetryWidenStepPrice, MaximumInitialStopWidenSteps);
+                VolatilityScaleMin, VolatilityScaleMax, TightenTrailingAfterR, TightenTrailingFactor);
             Print("Suggested TP line: enabled={0} (visual only; the cBot never creates or changes a take-profit order).",
                 ShowSuggestedTpLine);
             Print("Pre-trade guidance: enabled={0}; uses closed-candle EMA 9/21/50, RSI, momentum, ATR, spread, and recent market structure. Alignment score is heuristic, not a probability or entry order.",
@@ -501,19 +484,6 @@ namespace CTStopBot
                     return;
                 }
 
-                double estimatedInitialRiskCash;
-                if (TryEstimateInitialRiskCash(position, initialStop, out estimatedInitialRiskCash))
-                {
-                    Print("Position {0}: planned M1 wick SL risk estimate={1:F2} account-currency units including round-trip commission and slippage reserve; size={2:F2} lots.",
-                        position.Id, estimatedInitialRiskCash,
-                        Symbol.LotSize > 0.0 ? position.VolumeInUnits / Symbol.LotSize : 0.0);
-                    if (InitialRiskWarningCash > 0.0 && estimatedInitialRiskCash > InitialRiskWarningCash)
-                    {
-                        NotifyThrottled(position.Id, string.Format(CultureInfo.InvariantCulture,
-                            "RISK WARNING: structural M1 stop estimates {0:F2} account-currency units, above configured warning level {1:F2}. The bot retains the wick-based SL rather than silently moving it inside the wick; this threshold is a warning, not a hard loss cap.",
-                            estimatedInitialRiskCash, InitialRiskWarningCash));
-                    }
-                }
                 TryModifyStop(position, initialStop, true, 0.0, "initial previous-candle wick stop");
                 return;
             }
@@ -571,8 +541,8 @@ namespace CTStopBot
                 }
             }
 
-            // Activate trailing only after both live >= 1.50R and a post-entry closed
-            // candle confirms it. Persist activation; a later pullback does not erase it.
+            // Activate trailing at the configured M1 R threshold plus a post-entry
+            // closed-candle confirmation. Persist activation after confirmation.
             var trailingActivated = false;
             _trailingActivatedByPosition.TryGetValue(position.Id, out trailingActivated);
             if (EnableStructureTrailing && hasInitialRisk && !trailingActivated &&
@@ -2587,10 +2557,49 @@ namespace CTStopBot
         private double GetPreEntryCostReservePrice()
         {
             var baseReserve = GetBaseExecutionCostReservePrice();
-            if (Symbol.PipSize <= 0)
+            if (Symbol.PipSize <= 0.0 || Symbol.PipValue <= 0.0 || Symbol.LotSize <= 0.0)
                 return baseReserve;
 
-            return baseReserve + PreEntryCommissionReservePips * Symbol.PipSize;
+            // PipValue is the pip cash value per unit at cBot startup. Convert the
+            // configured round-trip cash commission per lot into price distance.
+            var pipValuePerLot = Symbol.PipValue * Symbol.LotSize;
+            if (pipValuePerLot <= 0.0 || double.IsNaN(pipValuePerLot) || double.IsInfinity(pipValuePerLot))
+                return baseReserve + PreEntryCommissionReservePips * Symbol.PipSize;
+
+            var roundTripCommissionPerLot = Math.Max(
+                2.0 * Math.Max(0.0, MinimumOneWayCommissionPerLot),
+                Math.Max(0.0, MinimumRoundTripCommissionReserve));
+            var dynamicCommissionPips = roundTripCommissionPerLot / pipValuePerLot;
+            if (double.IsNaN(dynamicCommissionPips) || double.IsInfinity(dynamicCommissionPips))
+                dynamicCommissionPips = 0.0;
+
+            var commissionReservePips = Math.Max(
+                Math.Max(0.0, PreEntryCommissionReservePips),
+                Math.Max(0.0, dynamicCommissionPips));
+
+            return baseReserve + commissionReservePips * Symbol.PipSize;
+        }
+
+        private void LogInitialRiskEstimate(Position position, double stopPrice)
+        {
+            double estimatedRiskCash;
+            if (!TryEstimateInitialRiskCash(position, stopPrice, out estimatedRiskCash))
+            {
+                NotifyThrottled(position.Id,
+                    "Initial SL cash-risk estimate unavailable: pip value or account-currency cost metadata is invalid. Verify broker settings.");
+                return;
+            }
+
+            var lots = Symbol.LotSize > 0.0 ? position.VolumeInUnits / Symbol.LotSize : 0.0;
+            Print("Position {0}: proposed initial SL={1}; estimated cash risk={2:F2} account-currency units including round-trip commission and slippage; size={3:F2} lots.",
+                position.Id, stopPrice, estimatedRiskCash, lots);
+
+            if (InitialRiskWarningCash > 0.0 && estimatedRiskCash > InitialRiskWarningCash)
+            {
+                NotifyThrottled(position.Id, string.Format(CultureInfo.InvariantCulture,
+                    "RISK WARNING: proposed M1 SL estimates {0:F2} account-currency units, above threshold {1:F2}. This is warning-only; the bot will not move the SL inside the wick, resize or close a manual position.",
+                    estimatedRiskCash, InitialRiskWarningCash));
+            }
         }
 
         private bool TryEstimateInitialRiskCash(Position position, double stopPrice, out double estimatedRiskCash)
@@ -2792,6 +2801,9 @@ namespace CTStopBot
                 // Initial protection must be established before any trailing/break-even update.
                 return;
             }
+
+            if (isInitial && !position.StopLoss.HasValue)
+                LogInitialRiskEstimate(position, stopPrice);
 
             DateTime lastAttempt;
             var retryDelay = RetryCooldownSeconds;
