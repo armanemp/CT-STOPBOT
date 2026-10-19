@@ -4,11 +4,13 @@ on:
   push:
     branches:
       - feature/stop-management-v0.1
+      - feature/m1-manual-scalp
       - main
   pull_request:
     branches:
       - main
       - feature/stop-management-v0.1
+      - feature/m1-manual-scalp
   workflow_dispatch:
 
 jobs:
@@ -39,6 +41,6 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: CT-STOPBOT-algo
-          path: src/CT-STOPBOT/bin/Release/net6.0/CT-STOPBOT.algo
+          name: CT-STOPBOT-M1-Manual-algo
+          path: src/CT-STOPBOT/bin/Release/net6.0/CT-STOPBOT-M1-Manual.algo
           if-no-files-found: error
