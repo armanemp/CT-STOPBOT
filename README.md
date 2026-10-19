@@ -10,7 +10,7 @@ This branch is the manual-trading robot only. It does not open, close, resize, o
 - It inspects up to three recently closed candles. A neighbouring candle may replace the previous candle's wick only when its relevant shadow is genuinely longer and its extreme extends by no more than the configured nearby-wick allowance (default 8 pips). It will not jump to a much more distant swing just because it exists.
 - The stop adds an ATR/spread-aware buffer, rounds outward to the symbol tick size, and checks cTrader's configured minimum stop distance. If market/broker constraints make the preferred level unplaceable, it logs the fallback clearly.
 - Existing manual SLs are not overwritten by the initial-stop routine. The manager tightens a stop only when break-even or trailing rules create a more protective level.
-- Every position on the current chart symbol is eligible by default, independent of label. Enable the label filter if another bot also trades the same symbol and should not be managed.
+- For safer separation from the companion auto-entry bot, the label filter is enabled by default and the managed label is empty, which targets unlabeled manual positions. If your manual trades carry a label, set that exact label in the parameters. Disable the filter only after confirming no other cBot on the same symbol could be managed by mistake.
 
 ## Commission, spread and risk
 
