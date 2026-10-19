@@ -29,7 +29,7 @@ If the wick stop is no longer placeable relative to the live quote or broker rul
 
 ## Break-even activation
 
-Default activation is 0.90R (with a hard floor of 0.75R), and requires both a favourable live move and at least one fully closed post-entry M1 candle confirming the configured R threshold. It also waits for the estimated execution-cost offset plus an extra activation margin. That means it will not necessarily move at 0.90R if the spread/commission cost threshold has not been met. The SL only changes if the candidate improves protection and is currently acceptable under market/broker-distance checks.
+Default activation is 0.90R (with a hard floor of 0.75R), and requires both a favourable live move and at least one fully closed post-entry M1 candle confirming the configured R threshold. It also waits for the estimated execution-cost offset plus an extra activation margin. That means it will not necessarily move at 0.90R if the commission/slippage cost threshold has not been met. The SL only changes if the candidate improves protection and is currently acceptable under market/broker-distance checks.
 
 No stop algorithm can guarantee a net non-negative exit. Slippage, gaps, commission conversion, spread spikes, broker rules and the exact fill can change realised P/L.
 
