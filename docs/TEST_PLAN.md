@@ -26,7 +26,7 @@
 ## Break-even and trailing
 
 - [ ] Confirm the BE candidate does not activate merely from unrealised profit before a fully closed post-entry M1 candle confirms the R threshold.
-- [ ] Confirm BE waits until estimated spread, round-trip commission and slippage offset plus the extra activation margin are covered.
+- [ ] Confirm BE waits until round-trip commission, negative-swap reserve, slippage and the minimum net-lock reserve are covered; the opening spread should not be counted twice in live Pips.
 - [ ] Compare the required offset with actual broker commission and final net P/L for a closed trade. Tune only after recording the difference.
 - [ ] Confirm BE only improves the stop and never loosens it.
 - [ ] Confirm trailing starts after the configured R threshold and closed-candle confirmation, then updates using closed-candle structure.
