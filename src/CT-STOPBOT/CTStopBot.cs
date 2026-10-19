@@ -2347,6 +2347,32 @@ namespace CTStopBot
                 if (!IsFinitePositive(candidate))
                     continue;
 
+                var candidateOpen = Bars.OpenPrices[i];
+                var candidateClose = Bars.ClosePrices[i];
+                var candidateHigh = Bars.HighPrices[i];
+                var candidateLow = Bars.LowPrices[i];
+                var candidateRange = candidateHigh - candidateLow;
+                if (candidateRange <= Symbol.TickSize)
+                    continue;
+
+                var candidateShadow = tradeType == TradeType.Buy
+                    ? Math.Min(candidateOpen, candidateClose) - candidateLow
+                    : candidateHigh - Math.Max(candidateOpen, candidateClose);
+                var candidateShadowRatio = candidateShadow / candidateRange;
+                var minimumShadowRatio = Math.Max(0.20, WickClusterMinShadowRatio * 0.5);
+                if (candidateShadow <= 0.0 || candidateShadowRatio < minimumShadowRatio)
+                    continue;
+
+                var primaryOpen = Bars.OpenPrices[lastClosedIndex];
+                var primaryClose = Bars.ClosePrices[lastClosedIndex];
+                var primaryHigh = Bars.HighPrices[lastClosedIndex];
+                var primaryLow = Bars.LowPrices[lastClosedIndex];
+                var primaryShadow = tradeType == TradeType.Buy
+                    ? Math.Min(primaryOpen, primaryClose) - primaryLow
+                    : primaryHigh - Math.Max(primaryOpen, primaryClose);
+                if (candidateShadow <= primaryShadow + Symbol.TickSize * 0.5)
+                    continue;
+
                 var extensionFromPrimary = tradeType == TradeType.Buy
                     ? primary - candidate
                     : candidate - primary;
