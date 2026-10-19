@@ -7,7 +7,7 @@ using cAlgo.API.Indicators;
 namespace CTStopBot
 {
     [Robot(TimeZone = TimeZones.UTC, AccessRights = AccessRights.None)]
-    public class CTStopBot : Robot
+    public class CTStopBotM1Manual : Robot
     {
         [Parameter("Symbol name contains", DefaultValue = "XAUUSD")]
         public string SymbolNameFilter { get; set; }
@@ -18,6 +18,18 @@ namespace CTStopBot
         [Parameter("Managed position label", DefaultValue = "CT-STOPBOT")]
         public string ManagedLabel { get; set; }
 
+        [Parameter("Nearby wick scan (closed M1 candles)", DefaultValue = 3, MinValue = 1, MaxValue = 6)]
+        public int NearbyWickScanBars { get; set; }
+
+        [Parameter("Maximum nearby wick extension (pips)", DefaultValue = 8.0, MinValue = 0.0, MaxValue = 50.0)]
+        public double MaximumNearbyWickExtensionPips { get; set; }
+
+        [Parameter("Minimum one-way commission per lot (account currency)", DefaultValue = 5.0, MinValue = 0.0, MaxValue = 1000.0)]
+        public double MinimumOneWayCommissionPerLot { get; set; }
+
+        [Parameter("Initial SL risk warning threshold (account currency, 0=off)", DefaultValue = 50.0, MinValue = 0.0, MaxValue = 1000000.0)]
+        public double InitialRiskWarningCash { get; set; }
+
         [Parameter("Enable initial stop placement", DefaultValue = true)]
         public bool EnableInitialStopPlacement { get; set; }
 
@@ -27,10 +39,10 @@ namespace CTStopBot
         [Parameter("Enable structure trailing", DefaultValue = true)]
         public bool EnableStructureTrailing { get; set; }
 
-        [Parameter("Break-even minimum activation (R)", DefaultValue = 1.25, MinValue = 1.0, MaxValue = 5.0)]
+        [Parameter("Break-even minimum activation (R)", DefaultValue = 0.90, MinValue = 0.50, MaxValue = 5.0)]
         public double BreakEvenTriggerR { get; set; }
 
-        [Parameter("Smart trailing minimum activation (R)", DefaultValue = 1.50, MinValue = 1.0, MaxValue = 10.0)]
+        [Parameter("Smart trailing minimum activation (R)", DefaultValue = 1.20, MinValue = 0.75, MaxValue = 10.0)]
         public double TrailingStartR { get; set; }
 
         [Parameter("Manage positions with server-side trailing", DefaultValue = false)]
@@ -39,7 +51,7 @@ namespace CTStopBot
         [Parameter("Show suggested TP line (visual only)", DefaultValue = true)]
         public bool ShowSuggestedTpLine { get; set; }
 
-        [Parameter("TP structure lookback (closed M5 candles)", DefaultValue = 30, MinValue = 5, MaxValue = 200)]
+        [Parameter("TP structure lookback (closed M1 candles)", DefaultValue = 30, MinValue = 5, MaxValue = 200)]
         public int TpStructureLookback { get; set; }
 
         [Parameter("TP base ATR multiplier", DefaultValue = 1.4, MinValue = 0.5, MaxValue = 5.0)]
@@ -81,10 +93,10 @@ namespace CTStopBot
         [Parameter("Confirmed pivot strength (bars each side)", DefaultValue = 2, MinValue = 1, MaxValue = 5)]
         public int ConfirmedPivotStrength { get; set; }
 
-        [Parameter("Swing lookback (closed M5 candles)", DefaultValue = 5, MinValue = 2, MaxValue = 50)]
+        [Parameter("Swing lookback (closed M1 candles)", DefaultValue = 5, MinValue = 2, MaxValue = 50)]
         public int SwingLookback { get; set; }
 
-        [Parameter("Wick-cluster lookback (closed M5 candles)", DefaultValue = 8, MinValue = 3, MaxValue = 50)]
+        [Parameter("Wick-cluster lookback (closed M1 candles)", DefaultValue = 4, MinValue = 3, MaxValue = 50)]
         public int WickClusterLookbackBars { get; set; }
 
         [Parameter("Minimum matching long-wick candles", DefaultValue = 2, MinValue = 2, MaxValue = 20)]
@@ -99,28 +111,28 @@ namespace CTStopBot
         [Parameter("Wick-cluster ATR buffer multiplier", DefaultValue = 0.20, MinValue = 0.0, MaxValue = 2.0)]
         public double WickClusterAtrBufferMultiplier { get; set; }
 
-        [Parameter("Wick-cluster spread buffer multiplier", DefaultValue = 0.75, MinValue = 0.0, MaxValue = 5.0)]
+        [Parameter("Wick-cluster spread buffer multiplier", DefaultValue = 0.35, MinValue = 0.0, MaxValue = 5.0)]
         public double WickClusterSpreadBufferMultiplier { get; set; }
 
         [Parameter("ATR period", DefaultValue = 14, MinValue = 2, MaxValue = 100)]
         public int AtrPeriod { get; set; }
 
-        [Parameter("Initial buffer: ATR multiplier", DefaultValue = 0.25, MinValue = 0.0, MaxValue = 3.0)]
+        [Parameter("Initial buffer: ATR multiplier", DefaultValue = 0.15, MinValue = 0.0, MaxValue = 3.0)]
         public double InitialAtrBuffer { get; set; }
 
-        [Parameter("Trailing buffer: ATR multiplier", DefaultValue = 0.20, MinValue = 0.0, MaxValue = 3.0)]
+        [Parameter("Trailing buffer: ATR multiplier", DefaultValue = 0.12, MinValue = 0.0, MaxValue = 3.0)]
         public double TrailingAtrBuffer { get; set; }
 
-        [Parameter("Minimum wick buffer (pips)", DefaultValue = 2.0, MinValue = 0.1, MaxValue = 100.0)]
+        [Parameter("Minimum wick buffer (pips)", DefaultValue = 3.0, MinValue = 0.1, MaxValue = 100.0)]
         public double MinimumWickBufferPips { get; set; }
 
-        [Parameter("Spread buffer multiplier", DefaultValue = 1.5, MinValue = 0.0, MaxValue = 10.0)]
+        [Parameter("Spread buffer multiplier", DefaultValue = 0.35, MinValue = 0.0, MaxValue = 10.0)]
         public double SpreadBufferMultiplier { get; set; }
 
-        [Parameter("Break-even activation extra (pips)", DefaultValue = 2.0, MinValue = 0.0, MaxValue = 100.0)]
+        [Parameter("Break-even activation extra (pips)", DefaultValue = 1.5, MinValue = 0.0, MaxValue = 100.0)]
         public double BreakEvenTriggerExtraPips { get; set; }
 
-        [Parameter("Break-even spread multiplier", DefaultValue = 1.0, MinValue = 0.0, MaxValue = 5.0)]
+        [Parameter("Break-even spread multiplier", DefaultValue = 0.75, MinValue = 0.0, MaxValue = 5.0)]
         public double BreakEvenSpreadMultiplier { get; set; }
 
         [Parameter("Round-trip commission multiplier", DefaultValue = 2.0, MinValue = 0.0, MaxValue = 5.0)]
@@ -132,16 +144,16 @@ namespace CTStopBot
         [Parameter("Additional cost reserve (account currency)", DefaultValue = 0.0, MinValue = 0.0)]
         public double AdditionalCostReserve { get; set; }
 
-        [Parameter("Slippage reserve (pips)", DefaultValue = 2.0, MinValue = 0.0, MaxValue = 100.0)]
+        [Parameter("Slippage reserve (pips)", DefaultValue = 3.0, MinValue = 0.0, MaxValue = 100.0)]
         public double SlippageReservePips { get; set; }
 
-        [Parameter("Pre-entry commission reserve (pips)", DefaultValue = 0.0, MinValue = 0.0, MaxValue = 1000.0)]
+        [Parameter("Pre-entry commission reserve (pips)", DefaultValue = 10.0, MinValue = 0.0, MaxValue = 1000.0)]
         public double PreEntryCommissionReservePips { get; set; }
 
-        [Parameter("Minimum net lock (pips)", DefaultValue = 0.5, MinValue = 0.0, MaxValue = 100.0)]
+        [Parameter("Minimum net lock (pips)", DefaultValue = 1.0, MinValue = 0.0, MaxValue = 100.0)]
         public double MinimumNetLockPips { get; set; }
 
-        [Parameter("Trailing step (pips)", DefaultValue = 2.0, MinValue = 0.1, MaxValue = 100.0)]
+        [Parameter("Trailing step (pips)", DefaultValue = 1.5, MinValue = 0.1, MaxValue = 100.0)]
         public double TrailingStepPips { get; set; }
 
         [Parameter("Minimum stop gap from market (pips)", DefaultValue = 2.0, MinValue = 0.1, MaxValue = 500.0)]
@@ -156,7 +168,7 @@ namespace CTStopBot
         [Parameter("Smart enhancements", DefaultValue = true)]
         public bool EnableSmartEnhancements { get; set; }
 
-        [Parameter("Spread floor (XAU price units)", DefaultValue = 0.22, MinValue = 0.0, MaxValue = 100.0)]
+        [Parameter("Spread floor (XAU price units)", DefaultValue = 0.25, MinValue = 0.0, MaxValue = 100.0)]
         public double SpreadFloorPrice { get; set; }
 
         [Parameter("Minimum quote-to-stop distance (x effective spread)", DefaultValue = 1.10, MinValue = 1.0, MaxValue = 10.0)]
@@ -177,10 +189,10 @@ namespace CTStopBot
         [Parameter("Tighten trailing factor", DefaultValue = 0.75, MinValue = 0.3, MaxValue = 1.0)]
         public double TightenTrailingFactor { get; set; }
 
-        [Parameter("Minimum initial SL distance (ATR, 0=off)", DefaultValue = 0.75, MinValue = 0.0, MaxValue = 10.0)]
+        [Parameter("Minimum initial SL distance (ATR, 0=off)", DefaultValue = 0.0, MinValue = 0.0, MaxValue = 10.0)]
         public double MinimumInitialSLAtrMultiple { get; set; }
 
-        [Parameter("Maximum initial SL distance (ATR, 0=off)", DefaultValue = 6.0, MinValue = 0.0, MaxValue = 50.0)]
+        [Parameter("Maximum initial SL distance (ATR, 0=off)", DefaultValue = 0.0, MinValue = 0.0, MaxValue = 50.0)]
         public double MaximumInitialSLAtrMultiple { get; set; }
 
         [Parameter("Initial SL rejection widen step (XAU price units)", DefaultValue = 0.03, MinValue = 0.0, MaxValue = 100.0)]
@@ -189,7 +201,7 @@ namespace CTStopBot
         [Parameter("Maximum initial SL widen steps", DefaultValue = 80, MinValue = 0, MaxValue = 500)]
         public int MaximumInitialStopWidenSteps { get; set; }
 
-        [Parameter("Emergency SL fallback distance (XAU price units)", DefaultValue = 0.60, MinValue = 0.01, MaxValue = 1000.0)]
+        [Parameter("Emergency SL fallback distance (XAU price units)", DefaultValue = 0.30, MinValue = 0.01, MaxValue = 1000.0)]
         public double EmergencyInitialStopFallbackDistancePrice { get; set; }
 
         private AverageTrueRange _atr;
@@ -227,9 +239,9 @@ namespace CTStopBot
         private const double MinimumDirectionalAlignment = 0.65;
         protected override void OnStart()
         {
-            if (TimeFrame != cAlgo.API.TimeFrame.Minute5)
+            if (TimeFrame != cAlgo.API.TimeFrame.Minute)
             {
-                Print("CT-STOPBOT stopped: attach it to an M5 chart. Current timeframe: {0}", TimeFrame);
+                Print("CT-STOPBOT stopped: attach it to an M1 chart. Current timeframe: {0}", TimeFrame);
                 Stop();
                 return;
             }
@@ -295,9 +307,11 @@ namespace CTStopBot
                 SymbolName, TimeFrame, RestrictToLabel ? " only when label matches '" + ManagedLabel + "'" : " regardless of label");
             Print("Symbol diagnostics: Bid={0}, Ask={1}, spread={2:F2} pips, PipSize={3}, TickSize={4}, PipValue={5}; broker min SL distance={6} {7}.",
                 Symbol.Bid, Symbol.Ask, spreadPips, Symbol.PipSize, Symbol.TickSize, Symbol.PipValue, Symbol.MinStopLossDistance, minDistanceUnit);
+            Print("M1 manual-stop profile: previous closed candle wick + nearby extension up to {0:F1} pips; spread floor={1:F3} XAU price units; commission reserve >= {2:F2} per side per lot; risk warning threshold={3:F2} account-currency units.",
+                MaximumNearbyWickExtensionPips, SpreadFloorPrice, MinimumOneWayCommissionPerLot, InitialRiskWarningCash);
             Print("Management switches: initial stop={0}, break-even={1} min {2:F2}R + post-entry closed-bar confirmation, structure trailing={3} starts at min {4:F2}R + closed-bar confirmation, native trailing positions={5}, label filter={6}.",
-                EnableInitialStopPlacement, EnableBreakEven, Math.Max(1.25, BreakEvenTriggerR),
-                EnableStructureTrailing, Math.Max(1.50, TrailingStartR),
+                EnableInitialStopPlacement, EnableBreakEven, Math.Max(0.75, BreakEvenTriggerR),
+                EnableStructureTrailing, Math.Max(1.0, TrailingStartR),
                 ManagePositionsWithServerTrailing, RestrictToLabel);
             Print("Initial R baseline is persisted per account/symbol/position. If no record exists, a loss-side SL is adopted as the baseline on first observation; this cannot prove it was the historical initial SL. If SL is at/beyond entry and no record exists, BE/trailing remain blocked rather than guessing.");
             Print("Smart enhancements={0}; spread floor={1:F3} XAU price units; spread spike={2:F2}x; ATR scale={3:F2}-{4:F2}; tighten trailing after={5:F2}R x {6:F2}; initial SL ATR bounds={7:F2}-{8:F2}; retry widening={9:F3} price units x {10} steps.",
@@ -446,7 +460,7 @@ namespace CTStopBot
                     if (TryCalculateEmergencyInitialStop(position, out emergencyStop))
                     {
                         NotifyThrottled(position.Id,
-                            "WARNING: M5 history is incomplete. Installing an emergency entry/market-gap SL without swing validation; review its risk immediately.");
+                            "WARNING: M1 history is incomplete. Installing an emergency entry/market-gap SL without swing validation; review its risk immediately.");
                         TryModifyStop(position, emergencyStop, true, 0.0,
                             "emergency initial protection (insufficient history)");
                         return;
@@ -454,7 +468,7 @@ namespace CTStopBot
                 }
 
                 NotifyThrottled(position.Id,
-                    string.Format("Not enough M5 history: {0} bars available, at least {1} required. Structural stop calculation is waiting; if emergency protection was not placeable, the position may remain unprotected.",
+                    string.Format("Not enough M1 history: {0} bars available, at least {1} required. Structural stop calculation is waiting; if emergency protection was not placeable, the position may remain unprotected.",
                         Bars.Count, minimumBarsRequired));
                 return;
             }
@@ -487,7 +501,20 @@ namespace CTStopBot
                     return;
                 }
 
-                TryModifyStop(position, initialStop, true, 0.0, "initial wick/ATR stop");
+                double estimatedInitialRiskCash;
+                if (TryEstimateInitialRiskCash(position, initialStop, out estimatedInitialRiskCash))
+                {
+                    Print("Position {0}: planned M1 wick SL risk estimate={1:F2} account-currency units including round-trip commission and slippage reserve; size={2:F2} lots.",
+                        position.Id, estimatedInitialRiskCash,
+                        Symbol.LotSize > 0.0 ? position.VolumeInUnits / Symbol.LotSize : 0.0);
+                    if (InitialRiskWarningCash > 0.0 && estimatedInitialRiskCash > InitialRiskWarningCash)
+                    {
+                        NotifyThrottled(position.Id, string.Format(CultureInfo.InvariantCulture,
+                            "RISK WARNING: structural M1 stop estimates {0:F2} account-currency units, above configured warning level {1:F2}. The bot retains the wick-based SL rather than silently moving it inside the wick; this threshold is a warning, not a hard loss cap.",
+                            estimatedInitialRiskCash, InitialRiskWarningCash));
+                    }
+                }
+                TryModifyStop(position, initialStop, true, 0.0, "initial previous-candle wick stop");
                 return;
             }
 
@@ -524,7 +551,7 @@ namespace CTStopBot
             // to confirm the enforced R threshold. The entry candle cannot confirm BE.
             double requiredOffsetPips;
             if (EnableBreakEven && hasInitialRisk &&
-                HasLiveAndClosedBarRConfirmation(position, initialRiskPrice, Math.Max(1.25, BreakEvenTriggerR)) &&
+                HasLiveAndClosedBarRConfirmation(position, initialRiskPrice, Math.Max(0.75, BreakEvenTriggerR)) &&
                 TryGetRequiredBreakEvenOffsetPips(position, out requiredOffsetPips) &&
                 position.Pips >= requiredOffsetPips + BreakEvenTriggerExtraPips)
             {
@@ -549,13 +576,13 @@ namespace CTStopBot
             var trailingActivated = false;
             _trailingActivatedByPosition.TryGetValue(position.Id, out trailingActivated);
             if (EnableStructureTrailing && hasInitialRisk && !trailingActivated &&
-                HasLiveAndClosedBarRConfirmation(position, initialRiskPrice, Math.Max(1.50, TrailingStartR)))
+                HasLiveAndClosedBarRConfirmation(position, initialRiskPrice, Math.Max(1.0, TrailingStartR)))
             {
                 trailingActivated = true;
                 _trailingActivatedByPosition[position.Id] = true;
                 SaveInitialRiskRecord(position, initialRiskPrice, true);
                 Print("Position {0}: smart trailing ACTIVATED after closed-bar confirmation at >= {1:F2}R; original risk={2}.",
-                    position.Id, Math.Max(1.50, TrailingStartR), initialRiskPrice);
+                    position.Id, Math.Max(1.0, TrailingStartR), initialRiskPrice);
             }
 
             var liveFavorableMove = GetExecutableFavorableMovePrice(position);
@@ -615,7 +642,7 @@ namespace CTStopBot
                 {
                     RemoveSuggestedTpObjects(position.Id);
                     NotifyThrottled(position.Id,
-                        "Suggested TP line is waiting for valid M5 history/market data. No take-profit order was changed.");
+                        "Suggested TP line is waiting for valid M1 history/market data. No take-profit order was changed.");
                     return;
                 }
 
@@ -643,7 +670,7 @@ namespace CTStopBot
 
                     // Smoothing/cooldown must not preserve an obsolete target through a
                     // newly detected structure or a changed RR/cost status. A structure-
-                    // capped target is refreshed on each new M5 bar, even for a small move.
+                    // capped target is refreshed on each new M1 bar, even for a small move.
                     var mustAdoptCandidate = contextChanged ||
                         (newBar && structureIsCurrentlyCappingTarget);
 
@@ -1010,7 +1037,7 @@ namespace CTStopBot
                     RemoveMarketGuideObject("SELL_SL");
                     RemoveMarketGuideObject("SELL_TP");
                     DrawMarketStatusText(string.Format(
-                        "CT-STOPBOT | WAITING FOR VALID M5 DATA (bars={0}; at least {1} bars plus valid quote/ATR/EMA/RSI required)",
+                        "CT-STOPBOT | WAITING FOR VALID M1 DATA (bars={0}; at least {1} bars plus valid quote/ATR/EMA/RSI required)",
                         Bars.Count, Math.Max(52, Math.Max(TpStructureLookback + 1, AtrPeriod + 2))));
                     return;
                 }
@@ -1412,14 +1439,14 @@ namespace CTStopBot
                 return false;
 
             var atrBuffer = atrPrice * InitialAtrBuffer;
-            var spreadBuffer = Math.Max(Symbol.Spread, Symbol.TickSize) * SpreadBufferMultiplier;
+            var spreadBuffer = Math.Max(GetEffectiveSpreadPrice(), Symbol.TickSize) * SpreadBufferMultiplier;
             var minimumBuffer = MinimumWickBufferPips * Symbol.PipSize;
             var stopBuffer = Math.Max(minimumBuffer, Math.Max(atrBuffer, spreadBuffer));
             var relevantWickCluster = tradeType == TradeType.Buy ? lowerWickCluster : upperWickCluster;
             if (relevantWickCluster)
                 stopBuffer = Math.Max(stopBuffer, Math.Max(
                     atrPrice * WickClusterAtrBufferMultiplier,
-                    Symbol.Spread * WickClusterSpreadBufferMultiplier));
+                    GetEffectiveSpreadPrice() * WickClusterSpreadBufferMultiplier));
 
             var pivotLookback = Math.Max(SwingLookback, ConfirmedPivotStrength * 2 + 3);
             double pivotAnchor = 0.0;
@@ -1435,6 +1462,18 @@ namespace CTStopBot
                     swingLow = pivotAnchor;
                 else
                     swingHigh = pivotAnchor;
+            }
+
+            double displayedWickAnchor;
+            string displayedWickContext;
+            if (TryGetM1InitialWickAnchor(lastClosedIndex, tradeType,
+                out displayedWickAnchor, out displayedWickContext))
+            {
+                if (tradeType == TradeType.Buy)
+                    swingLow = displayedWickAnchor;
+                else
+                    swingHigh = displayedWickAnchor;
+                stopUsesPivot = false;
             }
 
             var rawStop = tradeType == TradeType.Buy
@@ -2278,6 +2317,53 @@ namespace CTStopBot
             return IsFinitePositive(swingLow) && IsFinitePositive(swingHigh) && swingHigh >= swingLow;
         }
 
+        private bool TryGetM1InitialWickAnchor(
+            int lastClosedIndex,
+            TradeType tradeType,
+            out double anchorPrice,
+            out string anchorContext)
+        {
+            anchorPrice = 0.0;
+            anchorContext = "PREVIOUS_CANDLE";
+            if (lastClosedIndex < 0 || lastClosedIndex >= Bars.Count ||
+                Symbol.PipSize <= 0.0 || NearbyWickScanBars < 1)
+                return false;
+
+            // The most recently closed candle is always the primary reference.
+            // A neighbouring candle may replace it only if its extreme extends by
+            // a small configurable number of pips, avoiding a jump to distant structure.
+            var primary = tradeType == TradeType.Buy
+                ? Bars.LowPrices[lastClosedIndex]
+                : Bars.HighPrices[lastClosedIndex];
+            if (!IsFinitePositive(primary))
+                return false;
+
+            anchorPrice = primary;
+            var maximumExtension = MaximumNearbyWickExtensionPips * Symbol.PipSize;
+            var firstIndex = Math.Max(0, lastClosedIndex - Math.Max(1, NearbyWickScanBars - 1));
+            for (var i = lastClosedIndex - 1; i >= firstIndex; i--)
+            {
+                var candidate = tradeType == TradeType.Buy ? Bars.LowPrices[i] : Bars.HighPrices[i];
+                if (!IsFinitePositive(candidate))
+                    continue;
+
+                var extensionFromPrimary = tradeType == TradeType.Buy
+                    ? primary - candidate
+                    : candidate - primary;
+                var isMoreExtreme = tradeType == TradeType.Buy
+                    ? candidate < anchorPrice
+                    : candidate > anchorPrice;
+                if (isMoreExtreme && extensionFromPrimary > 0.0 &&
+                    extensionFromPrimary <= maximumExtension)
+                {
+                    anchorPrice = candidate;
+                    anchorContext = "NEARBY_WICK";
+                }
+            }
+
+            return IsFinitePositive(anchorPrice);
+        }
+
         private bool TryCalculateStructuralStop(Position position, double atrMultiplier, bool allowFallback, out double stopPrice)
         {
             stopPrice = 0.0;
@@ -2303,7 +2389,7 @@ namespace CTStopBot
             if (double.IsNaN(atrPrice) || double.IsInfinity(atrPrice) || atrPrice < 0)
                 atrPrice = 0.0;
 
-            var spreadBuffer = Math.Max(Symbol.Spread, Symbol.TickSize) * SpreadBufferMultiplier;
+            var spreadBuffer = Math.Max(GetEffectiveSpreadPrice(), Symbol.TickSize) * SpreadBufferMultiplier;
             var atrBuffer = atrPrice * atrMultiplier;
             var minimumBuffer = MinimumWickBufferPips * Symbol.PipSize;
             var buffer = Math.Max(minimumBuffer, Math.Max(spreadBuffer, atrBuffer));
@@ -2314,7 +2400,7 @@ namespace CTStopBot
             if (relevantWickCluster)
                 buffer = Math.Max(buffer, Math.Max(
                     atrPrice * WickClusterAtrBufferMultiplier,
-                    Symbol.Spread * WickClusterSpreadBufferMultiplier));
+                    GetEffectiveSpreadPrice() * WickClusterSpreadBufferMultiplier));
 
             if (allowFallback && !relevantWickCluster)
             {
@@ -2338,6 +2424,24 @@ namespace CTStopBot
                     else
                         swingHigh = pivotAnchor;
                 }
+            }
+
+            if (allowFallback)
+            {
+                double initialWickAnchor;
+                string initialWickContext;
+                if (!TryGetM1InitialWickAnchor(lastClosedIndex, position.TradeType,
+                    out initialWickAnchor, out initialWickContext))
+                    return false;
+
+                if (position.TradeType == TradeType.Buy)
+                    swingLow = initialWickAnchor;
+                else
+                    swingHigh = initialWickAnchor;
+
+                NotifyThrottled(position.Id, string.Format(CultureInfo.InvariantCulture,
+                    "Initial M1 SL anchor: {0}; reference={1}.",
+                    initialWickContext, initialWickAnchor));
             }
 
             var rawPrice = position.TradeType == TradeType.Buy
@@ -2463,6 +2567,30 @@ namespace CTStopBot
             return baseReserve + PreEntryCommissionReservePips * Symbol.PipSize;
         }
 
+        private bool TryEstimateInitialRiskCash(Position position, double stopPrice, out double estimatedRiskCash)
+        {
+            estimatedRiskCash = 0.0;
+            if (position == null || Symbol.PipSize <= 0.0 || Symbol.PipValue <= 0.0 ||
+                !IsFinitePositive(stopPrice) || !IsFinitePositive(position.EntryPrice))
+                return false;
+
+            var pipValueForPosition = Symbol.PipValue * position.VolumeInUnits;
+            if (!IsFinitePositive(pipValueForPosition))
+                return false;
+
+            var priceRiskPips = Math.Abs(position.EntryPrice - stopPrice) / Symbol.PipSize;
+            double roundTripCosts;
+            if (!TryGetEstimatedRoundTripCostCash(position, out roundTripCosts))
+                return false;
+
+            // Entry-to-SL price distance already contains the market spread paid at entry.
+            // Add estimated commission and slippage without counting spread twice.
+            estimatedRiskCash = priceRiskPips * pipValueForPosition +
+                roundTripCosts + SlippageReservePips * pipValueForPosition;
+            return !double.IsNaN(estimatedRiskCash) && !double.IsInfinity(estimatedRiskCash) &&
+                estimatedRiskCash >= 0.0;
+        }
+
         private bool TryGetEstimatedRoundTripCostCash(Position position, out double costCash)
         {
             costCash = 0.0;
@@ -2471,9 +2599,11 @@ namespace CTStopBot
 
             // Commissions reports the one-way cash cost. Include a round-trip multiplier,
             // the configured minimum commission, already accrued negative swap and extra costs.
+            var lots = Symbol.LotSize > 0.0 ? position.VolumeInUnits / Symbol.LotSize : 0.0;
+            var configuredRoundTripCommission = 2.0 * Math.Max(0.0, MinimumOneWayCommissionPerLot) * Math.Max(0.0, lots);
             var commissionCash = Math.Max(
                 Math.Abs(position.Commissions) * RoundTripCommissionMultiplier,
-                MinimumRoundTripCommissionReserve);
+                Math.Max(configuredRoundTripCommission, MinimumRoundTripCommissionReserve));
             var result = commissionCash + Math.Max(0.0, -position.Swap) + AdditionalCostReserve;
             if (double.IsNaN(result) || double.IsInfinity(result) || result < 0.0)
                 return false;
