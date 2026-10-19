@@ -14,6 +14,11 @@ $checks = @(
     @{ Name = "pre-entry qualification uses retained displayed prices"; Pattern = 'PredictDisplayedMarketGuidePrice\(' },
     @{ Name = "risk/reward is calculated from cost-adjusted price distances"; Pattern = 'TryCalculateNetRewardRisk' },
     @{ Name = "pre-entry commission reserve is explicit"; Pattern = 'PreEntryCommissionReservePips' },
+    @{ Name = "M1 timeframe guard"; Pattern = 'TimeFrame != cAlgo\.API\.TimeFrame\.Minute' },
+    @{ Name = "initial stop anchored to previous closed candle wick"; Pattern = 'TryGetM1InitialWickAnchor\(' },
+    @{ Name = "nearby wick extension is configurable"; Pattern = 'MaximumNearbyWickExtensionPips' },
+    @{ Name = "one-way commission scales per lot"; Pattern = 'MinimumOneWayCommissionPerLot' },
+    @{ Name = "initial cash-risk estimate and warning"; Pattern = 'TryEstimateInitialRiskCash\(' },
     @{ Name = "live positions use separate cost reserve"; Pattern = 'GetBaseExecutionCostReservePrice' },
     @{ Name = "position TP marks unknown original risk"; Pattern = 'context \+= "/R_UNKNOWN";' },
     @{ Name = "position TP marks unknown costs"; Pattern = 'context \+= "/COST_UNKNOWN";' },
@@ -38,6 +43,15 @@ foreach ($check in $checks) {
     }
 }
 
+if ($source -match 'TimeFrame\.Minute5|M5') {
+    throw "Invariant failed: the manual M1 cBot still contains an M5-only reference."
+}
+if ($source -notmatch 'Math\.Max\(0\.75, BreakEvenTriggerR\)') {
+    throw "Invariant failed: break-even activation floor must remain compatible with the M1 scalp profile."
+}
+if ($source -notmatch 'Math\.Max\(1\.0, TrailingStartR\)') {
+    throw "Invariant failed: trailing activation floor must remain compatible with the M1 scalp profile."
+}
 if ($source -match 'Chart\.DrawTrendLine\(lineName,\s*startBarIndex') {
     throw "Invariant failed: future bar indices are still used for trend lines."
 }
