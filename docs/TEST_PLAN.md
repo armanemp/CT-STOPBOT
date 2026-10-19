@@ -9,7 +9,7 @@
 - [ ] Confirm the resulting artifact is named `CT-STOPBOT-M1-Manual` and the file in cTrader's Robots folder matches the latest build.
 - [ ] Start on the broker's XAUUSD/Gold **M1** chart. Confirm it refuses M5 and any unapproved symbol.
 - [ ] Confirm the broker symbol alias, PipSize, TickSize, PipValue, current spread and minimum stop-loss distance in startup diagnostics.
-- [ ] Confirm whether all same-symbol positions or only a specific label should be managed.
+- [ ] Confirm the intended manual-position label. By default the cBot manages only positions with an empty label; verify this against a small manual demo trade and ensure positions opened by another cBot are excluded.
 - [ ] For a USD account with the stated schedule, confirm one-way commission is USD 5 per lot and set the account-currency parameter accordingly. Confirm the effective spread floor in price units; 0.25 means 25 pips only if PipSize = 0.01.
 
 ## Initial stop / nearby wick
