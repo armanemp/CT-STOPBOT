@@ -25,7 +25,7 @@ If the wick stop is no longer placeable relative to the live quote or broker rul
 - The commission parameter is denominated in the account's deposit currency. If the deposit currency is not USD, convert the broker's USD 5-per-side commission to account currency before relying on the default.
 - The effective spread floor defaults to **0.25 XAU price units**. If `PipSize = 0.01`, this is 25 pips—slightly above the approximately 22 pips described for the configured broker. The floor is deliberately price-unit based; confirm the actual startup diagnostics. If the broker's quote conventions differ, adjust this parameter.
 - For the initial SL, the entry-to-stop price distance already incorporates the spread paid between entry-side and exit-side quotes. The cash-risk estimate therefore adds round-trip commission and slippage reserve but does not add the spread twice as a separate cash fee.
-- The break-even offset separately includes the effective spread estimate, round-trip commission and fees, slippage reserve and a small net-lock amount. This is deliberately conservative and should be checked against actual closed-trade net P/L.
+- The break-even offset includes round-trip commission and fees, accrued negative swap, slippage reserve and a small net-lock amount. The opening spread is already reflected in live executable Pips measured from the entry fill, so it is not added a second time to the offset. Effective spread and broker minimum distance still constrain whether the new SL can be placed. This should be checked against actual closed-trade net P/L.
 
 ## Break-even activation
 
