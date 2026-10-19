@@ -6,7 +6,7 @@
     <AlgoBuild>true</AlgoBuild>
     <AlgoPublish>true</AlgoPublish>
     <IncludeSource>false</IncludeSource>
-    <AlgoName>CT-STOPBOT</AlgoName>
+    <AlgoName>CT-STOPBOT-M1-Manual</AlgoName>
   </PropertyGroup>
 
   <ItemGroup>
